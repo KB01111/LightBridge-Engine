@@ -1,0 +1,693 @@
+{
+    "schema_version":  1,
+    "upstream":  {
+                     "repository":  "https://github.com/ggml-org/llama.cpp.git",
+                     "release":  "b10153",
+                     "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                     "license":  "MIT"
+                 },
+    "generator":  {
+                      "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                      "endianness":  "little",
+                      "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                      "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                      "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4",
+                      "build":  "static ggml-base plus directly compiled ggml/src/ggml-cpu/quants.c",
+                      "configuration":  "Release",
+                      "floating_point":  "MSVC /fp:strict on ggml-base and bridge-quant-oracle; contraction and reassociation disabled",
+                      "cpu_dispatch":  "disabled"
+                  },
+    "source_records":  [
+                           {
+                               "upstream_path":  "ggml/src/ggml.c",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "a7d1fe7d94be4bee3df47f0d710fbfdb62087d1f",
+                               "upstream_sha256":  "84b5c2608cf70f7beacdaa67d3cc4b58d34654d57d3d50268ff4b9eb83a643e0",
+                               "external_worktree_sha256":  "3947981fc3aafd684b57e1f41548c60d87230bfa8c7ba66b741943d9f42b60d9",
+                               "purpose":  "F32 type-trait and bit-preserving ABI identity evidence."
+                           },
+                           {
+                               "upstream_path":  "ggml/src/ggml-quants.c",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "1ebc50a763f16db909de37090da38cc8c0fdde94",
+                               "upstream_sha256":  "07143d7068936ae46b3c528b2f3d4bbb666e74d88992165716174d243573965d",
+                               "external_worktree_sha256":  "c5829ed1b4ced3970964464eaf2c985af38008fa76c91af15f4f63ef4447ab1f",
+                               "purpose":  "Reference dequantizers and Q8_K reference quantizer."
+                           },
+                           {
+                               "upstream_path":  "ggml/src/ggml-quants.h",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "75188f1af180e3592f3c94bc4077989fb817c359",
+                               "upstream_sha256":  "28ae5fca1f3be636b36cd6c4fa2ca74fd42d229bfbd5352eaf66f3727bb8a6da",
+                               "external_worktree_sha256":  "f7676dc8160f940034cf092c6a0b27577e3677c6153cb476bb2bc78fb5f85762",
+                               "purpose":  "Reference dequantizer and Q8_K quantizer declarations."
+                           },
+                           {
+                               "upstream_path":  "ggml/src/ggml-impl.h",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "62b76abbcec9e71c860ba1a99d79b501bad26b93",
+                               "upstream_sha256":  "2ed56e264202906d107e26d08eabb242d3107b026ebfb78096fa1e5f94bdbbb8",
+                               "external_worktree_sha256":  "165258ef041cae44c3848f783402634717d3c97f6c3b112dd543cb1bde5c561a",
+                               "purpose":  "Pinned FP16 conversion and low-level helper declarations."
+                           },
+                           {
+                               "upstream_path":  "ggml/src/ggml-cpu/ggml-cpu.c",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "491316f7491252248d6f74a60440d3efa7aa6177",
+                               "upstream_sha256":  "f2abcaf7f627a2d8a4b7744a7128b210dad0d147fc92cb94ce9cbaed2945e84a",
+                               "external_worktree_sha256":  "b5e41ad21600eab8c56dfbc871df9c9e0ba23821b8ff35533ac1ec5dc42a21f5",
+                               "purpose":  "Dispatch and type-trait evidence; excluded from the build."
+                           },
+                           {
+                               "upstream_path":  "ggml/src/ggml-cpu/ggml-cpu-impl.h",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "5d1ca5ffcc368b9f0249d6cf6ccc4549bb9a3ab4",
+                               "upstream_sha256":  "e7008069e3e46f1db5e3d2eaafb4ddec3c7d0ece5c0454f99c5a8e33a50f20ba",
+                               "external_worktree_sha256":  "e35cc31320be8ba0412e8e577e54aa419e6030a4348a84097239d9d1795ec299",
+                               "purpose":  "Scalar CPU quantization support ABI evidence."
+                           },
+                           {
+                               "upstream_path":  "ggml/src/ggml-cpu/quants.c",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "5e36459f8cbc5900b375d2189414307393471a6b",
+                               "upstream_sha256":  "a61f1011e49d05b5f99d352b158d5b8e36cf008294bb0db309f72bdd7f1d4e35",
+                               "external_worktree_sha256":  "459ecbb123f56bd9230b2681430e7591764a5587b6b83f058f002bf6511fdbad",
+                               "purpose":  "Directly compiled generic scalar selected-type Q8_K dot kernels."
+                           },
+                           {
+                               "upstream_path":  "ggml/src/ggml-cpu/quants.h",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "93ea7eeffe5b00ad2c612aac49b7983c12949525",
+                               "upstream_sha256":  "918d6755b3e601ec7bb83c7dbf1d73304490651ccbb4072b0d31a2b45df751da",
+                               "external_worktree_sha256":  "90dfb1484e17e22eb2e7824c0d5c029e678e8c6469ca176be3962db36bc06d73",
+                               "purpose":  "Generic scalar selected-type Q8_K dot declarations."
+                           },
+                           {
+                               "upstream_path":  "src/models/hy-v3.cpp",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "47a0beaf217f19219e3e8fb8d5c35664625d7c73",
+                               "upstream_sha256":  "fcc0822f3291db653a3a723614f525bf96204161517abec5a56a3f5d1d8ac6c3",
+                               "external_worktree_sha256":  "4da02af4a1428a2461dc04b5713eb9154829f385211dec9bafecd4486c670c89",
+                               "purpose":  "Hy3 graph and selected packed-tensor execution reference."
+                           },
+                           {
+                               "upstream_path":  "tests/test-quantize-fns.cpp",
+                               "revision":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "upstream_git_blob_oid":  "9510ac14ce00805e1689a8c8b16b6dd6c329911c",
+                               "upstream_sha256":  "851f302b1f9338f2cc259f765cc36d702f13f564ee0fb6050043c7041a55c13b",
+                               "external_worktree_sha256":  "309817cbbcb2275746fa9ee8e43c8e7f6ab1f619e91da2490e219734fe04d892",
+                               "purpose":  "Upstream differential quantization-test methodology."
+                           }
+                       ],
+    "iq_tables":  [
+                      {
+                          "name":  "kmask_iq2xs",
+                          "element_type":  "u8",
+                          "element_count":  8,
+                          "bytes":  8,
+                          "serialization":  "little-endian integers",
+                          "sha256":  "5ac9831b2e30eb285ef34f8501620f878432d5c04331ad1ae47f977a83ba41a5",
+                          "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-common.h",
+                          "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                          "source_path":  "ggml/src/ggml-common.h",
+                          "source_function":  "kmask_iq2xs",
+                          "source_lines":  "509-511",
+                          "upstream_git_blob_oid":  "83f9118da84a6a61967a5c8a04af9893130a4e95",
+                          "upstream_blob_sha256":  "af255601767325f087313fa84b9435cb77aeec37df6b61b98d9ecc65f29fb4a0",
+                          "external_worktree_sha256":  "c7a75460f797ac4406f8af4a9e318c2f0674b7b660a1c81ce5b4c019dc29a89a",
+                          "local_vendored_sha256":  "af255601767325f087313fa84b9435cb77aeec37df6b61b98d9ecc65f29fb4a0",
+                          "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                          "endianness":  "little",
+                          "license":  "MIT",
+                          "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                          "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                          "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                      },
+                      {
+                          "name":  "iq2s_grid",
+                          "element_type":  "u64",
+                          "element_count":  1024,
+                          "bytes":  8192,
+                          "serialization":  "little-endian integers",
+                          "sha256":  "e1aa1473412b0552c2174c30ef22ab4073f6a181b85a17056e8249bd2932fd88",
+                          "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-common.h",
+                          "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                          "source_path":  "ggml/src/ggml-common.h",
+                          "source_function":  "iq2s_grid",
+                          "source_lines":  "758-1015",
+                          "upstream_git_blob_oid":  "83f9118da84a6a61967a5c8a04af9893130a4e95",
+                          "upstream_blob_sha256":  "af255601767325f087313fa84b9435cb77aeec37df6b61b98d9ecc65f29fb4a0",
+                          "external_worktree_sha256":  "c7a75460f797ac4406f8af4a9e318c2f0674b7b660a1c81ce5b4c019dc29a89a",
+                          "local_vendored_sha256":  "af255601767325f087313fa84b9435cb77aeec37df6b61b98d9ecc65f29fb4a0",
+                          "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                          "endianness":  "little",
+                          "license":  "MIT",
+                          "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                          "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                          "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                      },
+                      {
+                          "name":  "iq3s_grid",
+                          "element_type":  "u32",
+                          "element_count":  512,
+                          "bytes":  2048,
+                          "serialization":  "little-endian integers",
+                          "sha256":  "bd1af4945a1717c65610b0284e4628b9a1ba3b306fae3a06f6e5f597356e349f",
+                          "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-common.h",
+                          "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                          "source_path":  "ggml/src/ggml-common.h",
+                          "source_function":  "iq3s_grid",
+                          "source_lines":  "1052-1117",
+                          "upstream_git_blob_oid":  "83f9118da84a6a61967a5c8a04af9893130a4e95",
+                          "upstream_blob_sha256":  "af255601767325f087313fa84b9435cb77aeec37df6b61b98d9ecc65f29fb4a0",
+                          "external_worktree_sha256":  "c7a75460f797ac4406f8af4a9e318c2f0674b7b660a1c81ce5b4c019dc29a89a",
+                          "local_vendored_sha256":  "af255601767325f087313fa84b9435cb77aeec37df6b61b98d9ecc65f29fb4a0",
+                          "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                          "endianness":  "little",
+                          "license":  "MIT",
+                          "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                          "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                          "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                      }
+                  ],
+    "files":  [
+                  {
+                      "path":  "decode-f32.input.bin",
+                      "role":  "F32 ABI identity input bits",
+                      "bytes":  64,
+                      "sha256":  "b3e8edc79e70091d2fdd3e4226e03c49bcc85219ac664ac909673ac9305a4e15"
+                  },
+                  {
+                      "path":  "decode-f32.output-f32le.bin",
+                      "role":  "F32 ABI identity expected bits",
+                      "bytes":  64,
+                      "sha256":  "b3e8edc79e70091d2fdd3e4226e03c49bcc85219ac664ac909673ac9305a4e15"
+                  },
+                  {
+                      "path":  "decode-iq2-s.input.bin",
+                      "role":  "IQ2_S structural, LCG, and zero-scale packed blocks",
+                      "bytes":  246,
+                      "sha256":  "f727805b3cf3335de8b8d83df88704ac978378280e757d1fa4713c394957bb70"
+                  },
+                  {
+                      "path":  "decode-iq2-s.output-f32le.bin",
+                      "role":  "IQ2_S reference decoded F32LE values",
+                      "bytes":  3072,
+                      "sha256":  "8e2f82c79fa36b241213529daf7fe456a0cac3efb6158b17743ed3e0de2020a4"
+                  },
+                  {
+                      "path":  "decode-iq3-s.input.bin",
+                      "role":  "IQ3_S structural, LCG, and zero-scale packed blocks",
+                      "bytes":  330,
+                      "sha256":  "496ac30534619d9d722e9e9e88ccc9300473891b2a3d7a7a116061660bec6d37"
+                  },
+                  {
+                      "path":  "decode-iq3-s.output-f32le.bin",
+                      "role":  "IQ3_S reference decoded F32LE values",
+                      "bytes":  3072,
+                      "sha256":  "62417424adbafdc6fdb1d524d9cd6cb14f4b8746c7c7d5dff0d7bebbfbdc6512"
+                  },
+                  {
+                      "path":  "decode-q4-k.input.bin",
+                      "role":  "Q4_K structural, LCG, and zero-scale packed blocks",
+                      "bytes":  432,
+                      "sha256":  "35ba5f01848598c81886481ff6cb083c1532b3a77bef2242c5494ab9a1e25a40"
+                  },
+                  {
+                      "path":  "decode-q4-k.output-f32le.bin",
+                      "role":  "Q4_K reference decoded F32LE values",
+                      "bytes":  3072,
+                      "sha256":  "bf26c424906a978f2149b00ec054c35ed9ab93af384223b2dbabb20920b30a73"
+                  },
+                  {
+                      "path":  "decode-q5-k.input.bin",
+                      "role":  "Q5_K structural, LCG, and zero-scale packed blocks",
+                      "bytes":  528,
+                      "sha256":  "28d94a77d63d940e5ab4e8c615853124243522946da85b09df27c4a75e211f6d"
+                  },
+                  {
+                      "path":  "decode-q5-k.output-f32le.bin",
+                      "role":  "Q5_K reference decoded F32LE values",
+                      "bytes":  3072,
+                      "sha256":  "ae63040be7218f4d8ae5ec779197525f754576616812aa823bca294aaaadd14b"
+                  },
+                  {
+                      "path":  "dot-iq2-s-q8-k.output-f32le.bin",
+                      "role":  "Generic scalar IQ2_S by Q8_K dot result",
+                      "bytes":  4,
+                      "sha256":  "3d9151660ed213affc191f750e8ff02bdd8ce81e78d508defed06bb321fd10a7"
+                  },
+                  {
+                      "path":  "dot-iq3-s-q8-k.output-f32le.bin",
+                      "role":  "Generic scalar IQ3_S by Q8_K dot result",
+                      "bytes":  4,
+                      "sha256":  "b1ebe1b3f6e5789b8360ac7d157d992f617bb084d493d34e360c51cb2d2cbc5c"
+                  },
+                  {
+                      "path":  "dot-q4-k-q8-k.output-f32le.bin",
+                      "role":  "Generic scalar Q4_K by Q8_K dot result",
+                      "bytes":  4,
+                      "sha256":  "f37567ae0e2607aea21c66e6dca6b1782c47132feec32efdd412b732907b82cb"
+                  },
+                  {
+                      "path":  "dot-q5-k-q8-k.output-f32le.bin",
+                      "role":  "Generic scalar Q5_K by Q8_K dot result",
+                      "bytes":  4,
+                      "sha256":  "accac79c7b269652fa5a3934b850f561f499842f52a555d432145fa0ade362b4"
+                  },
+                  {
+                      "path":  "q8-k-activations.input-f32le.bin",
+                      "role":  "Finite structural, LCG, and zero Q8_K activation input",
+                      "bytes":  3072,
+                      "sha256":  "6d17fd2842f5d70b2fba6dcda516917878d780a4993097964780cf50b4a9636a"
+                  },
+                  {
+                      "path":  "q8-k-activations.output-q8-k.bin",
+                      "role":  "Reference block_q8_K activation encoding",
+                      "bytes":  876,
+                      "sha256":  "627fc80a95b7629f06686c36606a6abaef0f2a9904ed8af9667b16befc853bce"
+                  }
+              ],
+    "decode_vectors":  [
+                           {
+                               "id":  "decode-f32",
+                               "physical_type":  "F32",
+                               "block_elements":  1,
+                               "block_bytes":  4,
+                               "block_count":  16,
+                               "cases":  "representative_ieee754_bits",
+                               "input":  {
+                                             "path":  "decode-f32.input.bin",
+                                             "bytes":  64,
+                                             "sha256":  "b3e8edc79e70091d2fdd3e4226e03c49bcc85219ac664ac909673ac9305a4e15"
+                                         },
+                               "output":  {
+                                              "path":  "decode-f32.output-f32le.bin",
+                                              "bytes":  64,
+                                              "sha256":  "b3e8edc79e70091d2fdd3e4226e03c49bcc85219ac664ac909673ac9305a4e15"
+                                          },
+                               "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml.c",
+                               "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "source_path":  "ggml/src/ggml.c",
+                               "source_function":  "GGML_TYPE_F32 type traits (ABI identity)",
+                               "source_lines":  "662-667",
+                               "upstream_git_blob_oid":  "a7d1fe7d94be4bee3df47f0d710fbfdb62087d1f",
+                               "upstream_blob_sha256":  "84b5c2608cf70f7beacdaa67d3cc4b58d34654d57d3d50268ff4b9eb83a643e0",
+                               "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                               "endianness":  "little",
+                               "license":  "MIT",
+                               "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                               "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                               "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                           },
+                           {
+                               "id":  "decode-q4-k",
+                               "physical_type":  "Q4_K",
+                               "block_elements":  256,
+                               "block_bytes":  144,
+                               "block_count":  3,
+                               "cases":  [
+                                             "structural",
+                                             "lcg",
+                                             "zero_scale"
+                                         ],
+                               "input":  {
+                                             "path":  "decode-q4-k.input.bin",
+                                             "bytes":  432,
+                                             "sha256":  "35ba5f01848598c81886481ff6cb083c1532b3a77bef2242c5494ab9a1e25a40"
+                                         },
+                               "output":  {
+                                              "path":  "decode-q4-k.output-f32le.bin",
+                                              "bytes":  3072,
+                                              "sha256":  "bf26c424906a978f2149b00ec054c35ed9ab93af384223b2dbabb20920b30a73"
+                                          },
+                               "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-quants.c",
+                               "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "source_path":  "ggml/src/ggml-quants.c",
+                               "source_function":  "get_scale_min_k4 and dequantize_row_q4_K",
+                               "source_lines":  "880-887,1529-1551",
+                               "upstream_git_blob_oid":  "1ebc50a763f16db909de37090da38cc8c0fdde94",
+                               "upstream_blob_sha256":  "07143d7068936ae46b3c528b2f3d4bbb666e74d88992165716174d243573965d",
+                               "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                               "endianness":  "little",
+                               "license":  "MIT",
+                               "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                               "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                               "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                           },
+                           {
+                               "id":  "decode-q5-k",
+                               "physical_type":  "Q5_K",
+                               "block_elements":  256,
+                               "block_bytes":  176,
+                               "block_count":  3,
+                               "cases":  [
+                                             "structural",
+                                             "lcg",
+                                             "zero_scale"
+                                         ],
+                               "input":  {
+                                             "path":  "decode-q5-k.input.bin",
+                                             "bytes":  528,
+                                             "sha256":  "28d94a77d63d940e5ab4e8c615853124243522946da85b09df27c4a75e211f6d"
+                                         },
+                               "output":  {
+                                              "path":  "decode-q5-k.output-f32le.bin",
+                                              "bytes":  3072,
+                                              "sha256":  "ae63040be7218f4d8ae5ec779197525f754576616812aa823bca294aaaadd14b"
+                                          },
+                               "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-quants.c",
+                               "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "source_path":  "ggml/src/ggml-quants.c",
+                               "source_function":  "get_scale_min_k4 and dequantize_row_q5_K",
+                               "source_lines":  "880-887,1731-1756",
+                               "upstream_git_blob_oid":  "1ebc50a763f16db909de37090da38cc8c0fdde94",
+                               "upstream_blob_sha256":  "07143d7068936ae46b3c528b2f3d4bbb666e74d88992165716174d243573965d",
+                               "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                               "endianness":  "little",
+                               "license":  "MIT",
+                               "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                               "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                               "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                           },
+                           {
+                               "id":  "decode-iq2-s",
+                               "physical_type":  "IQ2_S",
+                               "block_elements":  256,
+                               "block_bytes":  82,
+                               "block_count":  3,
+                               "cases":  [
+                                             "structural",
+                                             "lcg",
+                                             "zero_scale"
+                                         ],
+                               "input":  {
+                                             "path":  "decode-iq2-s.input.bin",
+                                             "bytes":  246,
+                                             "sha256":  "f727805b3cf3335de8b8d83df88704ac978378280e757d1fa4713c394957bb70"
+                                         },
+                               "output":  {
+                                              "path":  "decode-iq2-s.output-f32le.bin",
+                                              "bytes":  3072,
+                                              "sha256":  "8e2f82c79fa36b241213529daf7fe456a0cac3efb6158b17743ed3e0de2020a4"
+                                          },
+                               "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-quants.c",
+                               "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "source_path":  "ggml/src/ggml-quants.c",
+                               "source_function":  "dequantize_row_iq2_s",
+                               "source_lines":  "2543-2571",
+                               "upstream_git_blob_oid":  "1ebc50a763f16db909de37090da38cc8c0fdde94",
+                               "upstream_blob_sha256":  "07143d7068936ae46b3c528b2f3d4bbb666e74d88992165716174d243573965d",
+                               "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                               "endianness":  "little",
+                               "license":  "MIT",
+                               "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                               "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                               "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                           },
+                           {
+                               "id":  "decode-iq3-s",
+                               "physical_type":  "IQ3_S",
+                               "block_elements":  256,
+                               "block_bytes":  110,
+                               "block_count":  3,
+                               "cases":  [
+                                             "structural",
+                                             "lcg",
+                                             "zero_scale"
+                                         ],
+                               "input":  {
+                                             "path":  "decode-iq3-s.input.bin",
+                                             "bytes":  330,
+                                             "sha256":  "496ac30534619d9d722e9e9e88ccc9300473891b2a3d7a7a116061660bec6d37"
+                                         },
+                               "output":  {
+                                              "path":  "decode-iq3-s.output-f32le.bin",
+                                              "bytes":  3072,
+                                              "sha256":  "62417424adbafdc6fdb1d524d9cd6cb14f4b8746c7c7d5dff0d7bebbfbdc6512"
+                                          },
+                               "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-quants.c",
+                               "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                               "source_path":  "ggml/src/ggml-quants.c",
+                               "source_function":  "dequantize_row_iq3_s",
+                               "source_lines":  "2607-2646",
+                               "upstream_git_blob_oid":  "1ebc50a763f16db909de37090da38cc8c0fdde94",
+                               "upstream_blob_sha256":  "07143d7068936ae46b3c528b2f3d4bbb666e74d88992165716174d243573965d",
+                               "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                               "endianness":  "little",
+                               "license":  "MIT",
+                               "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                               "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                               "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                           }
+                       ],
+    "q8_k_vectors":  [
+                         {
+                             "id":  "q8-k-activations",
+                             "physical_type":  "Q8_K",
+                             "block_elements":  256,
+                             "block_bytes":  292,
+                             "block_count":  3,
+                             "cases":  [
+                                           "structural",
+                                           "lcg",
+                                           "zero"
+                                       ],
+                             "input":  {
+                                           "path":  "q8-k-activations.input-f32le.bin",
+                                           "bytes":  3072,
+                                           "sha256":  "6d17fd2842f5d70b2fba6dcda516917878d780a4993097964780cf50b4a9636a"
+                                       },
+                             "output":  {
+                                            "path":  "q8-k-activations.output-q8-k.bin",
+                                            "bytes":  876,
+                                            "sha256":  "627fc80a95b7629f06686c36606a6abaef0f2a9904ed8af9667b16befc853bce"
+                                        },
+                             "block_sums":  [
+                                                -46,
+                                                -98,
+                                                130,
+                                                115,
+                                                175,
+                                                -310,
+                                                36,
+                                                -12,
+                                                -44,
+                                                -310,
+                                                77,
+                                                166,
+                                                118,
+                                                -39,
+                                                85,
+                                                -63,
+                                                -203,
+                                                -33,
+                                                -302,
+                                                -64,
+                                                598,
+                                                -176,
+                                                332,
+                                                9,
+                                                -210,
+                                                -401,
+                                                -135,
+                                                -4,
+                                                169,
+                                                -709,
+                                                -182,
+                                                410,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0,
+                                                0
+                                            ],
+                             "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-quants.c",
+                             "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                             "source_path":  "ggml/src/ggml-quants.c",
+                             "source_function":  "nearest_int and quantize_row_q8_K_ref",
+                             "source_lines":  "621-626,2768-2805",
+                             "upstream_git_blob_oid":  "1ebc50a763f16db909de37090da38cc8c0fdde94",
+                             "upstream_blob_sha256":  "07143d7068936ae46b3c528b2f3d4bbb666e74d88992165716174d243573965d",
+                             "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                             "endianness":  "little",
+                             "license":  "MIT",
+                             "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                             "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                             "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                         }
+                     ],
+    "dot_vectors":  [
+                        {
+                            "id":  "dot-q4-k-q8-k",
+                            "weight_type":  "Q4_K",
+                            "n":  768,
+                            "nrc":  1,
+                            "strides":  {
+                                            "bs":  0,
+                                            "bx":  0,
+                                            "by":  0
+                                        },
+                            "weight_block_bytes":  144,
+                            "weight_input":  {
+                                                 "path":  "decode-q4-k.input.bin",
+                                                 "bytes":  432,
+                                                 "sha256":  "35ba5f01848598c81886481ff6cb083c1532b3a77bef2242c5494ab9a1e25a40"
+                                             },
+                            "q8_input":  {
+                                             "path":  "q8-k-activations.output-q8-k.bin",
+                                             "bytes":  876,
+                                             "sha256":  "627fc80a95b7629f06686c36606a6abaef0f2a9904ed8af9667b16befc853bce"
+                                         },
+                            "output":  {
+                                           "path":  "dot-q4-k-q8-k.output-f32le.bin",
+                                           "bytes":  4,
+                                           "sha256":  "f37567ae0e2607aea21c66e6dca6b1782c47132feec32efdd412b732907b82cb"
+                                       },
+                            "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-cpu/quants.c",
+                            "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                            "source_path":  "ggml/src/ggml-cpu/quants.c",
+                            "source_function":  "ggml_vec_dot_q4_K_q8_K_generic",
+                            "source_lines":  "696-769",
+                            "upstream_git_blob_oid":  "5e36459f8cbc5900b375d2189414307393471a6b",
+                            "upstream_blob_sha256":  "a61f1011e49d05b5f99d352b158d5b8e36cf008294bb0db309f72bdd7f1d4e35",
+                            "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                            "endianness":  "little",
+                            "license":  "MIT",
+                            "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                            "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                            "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                        },
+                        {
+                            "id":  "dot-q5-k-q8-k",
+                            "weight_type":  "Q5_K",
+                            "n":  768,
+                            "nrc":  1,
+                            "strides":  {
+                                            "bs":  0,
+                                            "bx":  0,
+                                            "by":  0
+                                        },
+                            "weight_block_bytes":  176,
+                            "weight_input":  {
+                                                 "path":  "decode-q5-k.input.bin",
+                                                 "bytes":  528,
+                                                 "sha256":  "28d94a77d63d940e5ab4e8c615853124243522946da85b09df27c4a75e211f6d"
+                                             },
+                            "q8_input":  {
+                                             "path":  "q8-k-activations.output-q8-k.bin",
+                                             "bytes":  876,
+                                             "sha256":  "627fc80a95b7629f06686c36606a6abaef0f2a9904ed8af9667b16befc853bce"
+                                         },
+                            "output":  {
+                                           "path":  "dot-q5-k-q8-k.output-f32le.bin",
+                                           "bytes":  4,
+                                           "sha256":  "accac79c7b269652fa5a3934b850f561f499842f52a555d432145fa0ade362b4"
+                                       },
+                            "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-cpu/quants.c",
+                            "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                            "source_path":  "ggml/src/ggml-cpu/quants.c",
+                            "source_function":  "ggml_vec_dot_q5_K_q8_K_generic",
+                            "source_lines":  "771-849",
+                            "upstream_git_blob_oid":  "5e36459f8cbc5900b375d2189414307393471a6b",
+                            "upstream_blob_sha256":  "a61f1011e49d05b5f99d352b158d5b8e36cf008294bb0db309f72bdd7f1d4e35",
+                            "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                            "endianness":  "little",
+                            "license":  "MIT",
+                            "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                            "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                            "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                        },
+                        {
+                            "id":  "dot-iq2-s-q8-k",
+                            "weight_type":  "IQ2_S",
+                            "n":  768,
+                            "nrc":  1,
+                            "strides":  {
+                                            "bs":  0,
+                                            "bx":  0,
+                                            "by":  0
+                                        },
+                            "weight_block_bytes":  82,
+                            "weight_input":  {
+                                                 "path":  "decode-iq2-s.input.bin",
+                                                 "bytes":  246,
+                                                 "sha256":  "f727805b3cf3335de8b8d83df88704ac978378280e757d1fa4713c394957bb70"
+                                             },
+                            "q8_input":  {
+                                             "path":  "q8-k-activations.output-q8-k.bin",
+                                             "bytes":  876,
+                                             "sha256":  "627fc80a95b7629f06686c36606a6abaef0f2a9904ed8af9667b16befc853bce"
+                                         },
+                            "output":  {
+                                           "path":  "dot-iq2-s-q8-k.output-f32le.bin",
+                                           "bytes":  4,
+                                           "sha256":  "3d9151660ed213affc191f750e8ff02bdd8ce81e78d508defed06bb321fd10a7"
+                                       },
+                            "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-cpu/quants.c",
+                            "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                            "source_path":  "ggml/src/ggml-cpu/quants.c",
+                            "source_function":  "ggml_vec_dot_iq2_s_q8_K_generic",
+                            "source_lines":  "998-1048",
+                            "upstream_git_blob_oid":  "5e36459f8cbc5900b375d2189414307393471a6b",
+                            "upstream_blob_sha256":  "a61f1011e49d05b5f99d352b158d5b8e36cf008294bb0db309f72bdd7f1d4e35",
+                            "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                            "endianness":  "little",
+                            "license":  "MIT",
+                            "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                            "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                            "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                        },
+                        {
+                            "id":  "dot-iq3-s-q8-k",
+                            "weight_type":  "IQ3_S",
+                            "n":  768,
+                            "nrc":  1,
+                            "strides":  {
+                                            "bs":  0,
+                                            "bx":  0,
+                                            "by":  0
+                                        },
+                            "weight_block_bytes":  110,
+                            "weight_input":  {
+                                                 "path":  "decode-iq3-s.input.bin",
+                                                 "bytes":  330,
+                                                 "sha256":  "496ac30534619d9d722e9e9e88ccc9300473891b2a3d7a7a116061660bec6d37"
+                                             },
+                            "q8_input":  {
+                                             "path":  "q8-k-activations.output-q8-k.bin",
+                                             "bytes":  876,
+                                             "sha256":  "627fc80a95b7629f06686c36606a6abaef0f2a9904ed8af9667b16befc853bce"
+                                         },
+                            "output":  {
+                                           "path":  "dot-iq3-s-q8-k.output-f32le.bin",
+                                           "bytes":  4,
+                                           "sha256":  "b1ebe1b3f6e5789b8360ac7d157d992f617bb084d493d34e360c51cb2d2cbc5c"
+                                       },
+                            "source_url":  "https://github.com/ggml-org/llama.cpp/blob/b77d646751d01c0962bc203b6809e9d94f7d50b7/ggml/src/ggml-cpu/quants.c",
+                            "commit":  "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+                            "source_path":  "ggml/src/ggml-cpu/quants.c",
+                            "source_function":  "ggml_vec_dot_iq3_s_q8_K_generic",
+                            "source_lines":  "1094-1148",
+                            "upstream_git_blob_oid":  "5e36459f8cbc5900b375d2189414307393471a6b",
+                            "upstream_blob_sha256":  "a61f1011e49d05b5f99d352b158d5b8e36cf008294bb0db309f72bdd7f1d4e35",
+                            "generation_command":  "rtk powershell -NoProfile -ExecutionPolicy Bypass -File tools/quant-oracle/generate-vectors.ps1",
+                            "endianness":  "little",
+                            "license":  "MIT",
+                            "local_oracle_sha256":  "14e23e999631defbf1d7f8d6ab89131c5a515393e487bfc3d5f15f440662dc70",
+                            "local_generator_sha256":  "cfd03f38f48b1ea7ded23809db9d15a3bb1911d9f2d7c81df1d5b0849e8929ab",
+                            "local_cmake_sha256":  "3aa009a8bd14f1ce613abd62d980b39f9300ccc985e51e5ae369cbb1c473f4a4"
+                        }
+                    ]
+}

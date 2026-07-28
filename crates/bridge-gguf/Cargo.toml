@@ -1,0 +1,15 @@
+[package]
+name = "bridge-gguf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Bounded, payload-isolated GGUF v2/v3 inspection for the LightBridge Hy3 engine."
+
+[features]
+test-utils = []
+
+[dependencies]
+bridge-core.workspace = true
+thiserror.workspace = true

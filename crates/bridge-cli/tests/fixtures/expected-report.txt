@@ -1,0 +1,214 @@
+Model
+  architecture: hy_v3
+  name: Hy3 Src
+  license: apache-2.0
+  size label: 192x10B
+  quantization version: 2
+  file type: 29
+
+Files
+  <in-memory-test-shard>
+    shard ordinal: 0
+    shard count: 1
+    version: 3
+    endianness: little
+    metadata count: 45
+    alignment: 32 bytes (32 B)
+    logical size: 96019311104 bytes (89.42 GiB)
+    data offset: 5160192 bytes (4.92 MiB)
+
+GGUF
+  version: 3
+  endianness: little
+  authoritative metadata count: 45
+  tensor count: 1278
+  alignment: 32 bytes (32 B)
+  encoded tensor bytes: 96014150912 bytes (89.42 GiB)
+
+Hy3
+  block count: 80
+  context length: 1048576
+  embedding length: 4096
+  dense FFN length: 13312
+  expert FFN length: 1536
+  shared expert FFN length: 1536
+  attention heads: 64
+  attention KV heads: 8
+  key length: 128
+  value length: 128
+  RMS epsilon: 0.00001
+  experts: 192
+  top-k: 8
+  expert weights norm: true
+  expert gating function: 2
+  expert weights scale: 2.826
+  RoPE base: 11158840
+  RoPE scaling type: yarn
+  YaRN factor: 4
+  YaRN original context: 262144
+  vocabulary size: 120832
+  MTP: false
+
+Tokenizer
+  model: gpt2
+  pretokenizer: hunyuan-dense
+  token count: 120832
+  merge count: 119758
+  token type count: 120832
+  BOS token ID: 120000
+  EOS token ID: 120025
+  padding token ID: 120002
+  separator token ID: 120007
+  chat template present: true
+
+Tensor types
+  F32: 479 tensors / 62823232 logical elements / 251292928 bytes (239.65 MiB)
+  IQ2_S: 627 tensors / 284841476096 logical elements / 91238285312 bytes (84.97 GiB)
+  IQ3_S: 91 tensors / 9298771968 logical elements / 3995566080 bytes (3.72 GiB)
+  Q4_K: 80 tensors / 335544320 logical elements / 188743680 bytes (180.00 MiB)
+  Q5_K: 1 tensors / 494927872 logical elements / 340262912 bytes (324.50 MiB)
+
+Tensor roles
+  dense_layer_0_ffn: 3 tensors / 163577856 logical elements / 58359808 bytes (55.66 MiB)
+  routed_experts: 237 tensors / 286286413824 logical elements / 92361719808 bytes (86.02 GiB)
+  shared_experts: 237 tensors / 1491075072 logical elements / 480362496 bytes (458.11 MiB)
+  attention: 320 tensors / 6039797760 logical elements / 2309488640 bytes (2.15 GiB)
+  routers: 158 tensors / 62143296 logical elements / 248573184 bytes (237.06 MiB)
+  embeddings: 1 tensors / 494927872 logical elements / 212664320 bytes (202.81 MiB)
+  norms: 321 tensors / 679936 logical elements / 2719744 bytes (2.59 MiB)
+  output_total: 1 tensors / 494927872 logical elements / 340262912 bytes (324.50 MiB)
+  attention_k: 80 tensors / 335544320 logical elements / 107479040 bytes (102.50 MiB)
+  attention_k_norm: 80 tensors / 10240 logical elements / 40960 bytes (40.00 KiB)
+  attention_norm: 80 tensors / 327680 logical elements / 1310720 bytes (1.25 MiB)
+  attention_output: 80 tensors / 2684354560 logical elements / 1153433600 bytes (1.07 GiB)
+  attention_q: 80 tensors / 2684354560 logical elements / 859832320 bytes (820.00 MiB)
+  attention_q_norm: 80 tensors / 10240 logical elements / 40960 bytes (40.00 KiB)
+  attention_v: 80 tensors / 335544320 logical elements / 188743680 bytes (180.00 MiB)
+  dense_down: 1 tensors / 54525952 logical elements / 23429120 bytes (22.34 MiB)
+  dense_gate: 1 tensors / 54525952 logical elements / 17465344 bytes (16.66 MiB)
+  dense_up: 1 tensors / 54525952 logical elements / 17465344 bytes (16.66 MiB)
+  ffn_norm: 80 tensors / 327680 logical elements / 1310720 bytes (1.25 MiB)
+  output: 1 tensors / 494927872 logical elements / 340262912 bytes (324.50 MiB)
+  output_norm: 1 tensors / 4096 logical elements / 16384 bytes (16.00 KiB)
+  routed_down: 79 tensors / 95428804608 logical elements / 31227641856 bytes (29.08 GiB)
+  routed_gate: 79 tensors / 95428804608 logical elements / 30567038976 bytes (28.47 GiB)
+  routed_up: 79 tensors / 95428804608 logical elements / 30567038976 bytes (28.47 GiB)
+  router_input: 79 tensors / 62128128 logical elements / 248512512 bytes (237.00 MiB)
+  router_selection_bias: 79 tensors / 15168 logical elements / 60672 bytes (59.25 KiB)
+  shared_down: 79 tensors / 497025024 logical elements / 161955840 bytes (154.45 MiB)
+  shared_gate: 79 tensors / 497025024 logical elements / 159203328 bytes (151.83 MiB)
+  shared_up: 79 tensors / 497025024 logical elements / 159203328 bytes (151.83 MiB)
+  token_embedding: 1 tensors / 494927872 logical elements / 212664320 bytes (202.81 MiB)
+
+Layers
+  0: 11 tensors / 239083776 logical elements / 87262208 bytes (83.22 MiB)
+  1: 16 tensors / 3719045568 logical elements / 1331676928 bytes (1.24 GiB)
+  2: 16 tensors / 3719045568 logical elements / 1331676928 bytes (1.24 GiB)
+  3: 16 tensors / 3719045568 logical elements / 1331676928 bytes (1.24 GiB)
+  4: 16 tensors / 3719045568 logical elements / 1331676928 bytes (1.24 GiB)
+  5: 16 tensors / 3719045568 logical elements / 1330988800 bytes (1.24 GiB)
+  6: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  7: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  8: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  9: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  10: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  11: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  12: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  13: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  14: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  15: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  16: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  17: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  18: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  19: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  20: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  21: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  22: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  23: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  24: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  25: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  26: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  27: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  28: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  29: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  30: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  31: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  32: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  33: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  34: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  35: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  36: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  37: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  38: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  39: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  40: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  41: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  42: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  43: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  44: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  45: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  46: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  47: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  48: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  49: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  50: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  51: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  52: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  53: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  54: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  55: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  56: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  57: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  58: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  59: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  60: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  61: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  62: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  63: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  64: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  65: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  66: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  67: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  68: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  69: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  70: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  71: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  72: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  73: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  74: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  75: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  76: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  77: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  78: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+  79: 16 tensors / 3719045568 logical elements / 1198868224 bytes (1.12 GiB)
+
+Expert storage
+  expert count: 192
+  routed banks: 237 tensors / 286286413824 logical elements / 92361719808 bytes (86.02 GiB)
+  shared experts: 237 tensors / 1491075072 logical elements / 480362496 bytes (458.11 MiB)
+  routed_down/IQ2_S:
+    tensor count: 74
+    expert count: 192
+    slab logical elements: 6291456
+    slab bytes: 2015232 bytes (1.92 MiB)
+  routed_down/IQ3_S:
+    tensor count: 5
+    expert count: 192
+    slab logical elements: 6291456
+    slab bytes: 2703360 bytes (2.58 MiB)
+  routed_gate/IQ2_S:
+    tensor count: 79
+    expert count: 192
+    slab logical elements: 6291456
+    slab bytes: 2015232 bytes (1.92 MiB)
+  routed_up/IQ2_S:
+    tensor count: 79
+    expert count: 192
+    slab logical elements: 6291456
+    slab bytes: 2015232 bytes (1.92 MiB)
+
+Execution status
+  unsupported execution types: F32, IQ2_S, IQ3_S, Q4_K, Q5_K
+
+Warnings
+  - Tensor payload bytes were not read or verified.

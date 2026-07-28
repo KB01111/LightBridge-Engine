@@ -1,0 +1,20 @@
+[package]
+name = "bridge-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Safe GGML tensor descriptions, aligned arenas, and host-topology detection for the LightBridge Hy3 engine."
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+half.workspace = true
+raw-cpuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

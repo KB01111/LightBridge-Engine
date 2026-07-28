@@ -1,0 +1,280 @@
+format_version = 1
+
+[upstream]
+repository = "https://github.com/ggml-org/llama.cpp.git"
+release = "b10153"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+license = "MIT"
+content_identity = "git commit blob bytes"
+
+[inventory]
+manifest_path = "vendor/upstream/llama.cpp/PINNED.toml"
+manifest_self_excluded = true
+entry_count = 13
+oracle_source_count = 10
+oracle_sources_external_only = true
+
+[comparison]
+local_line_endings = "LF"
+external_checkout_line_endings = "CRLF"
+status_basis = "local git hash-object equals upstream HEAD:path blob object ID"
+sha256_basis = "upstream_sha256 hashes the commit blob; external_worktree_sha256 records the authenticated Windows checkout bytes"
+
+[[files]]
+local_path = "ggml/include/ggml.h"
+upstream_path = "ggml/include/ggml.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "c65c30fdb4dce95eac71c26bb38ae8423fbc80d79db91d2b2ffaea8c4e46276a"
+external_worktree_sha256 = "1c742664271b46a362f6a0f5c925a462224d3f939c5b777a5ef429ace5efb0d0"
+local_sha256 = "c65c30fdb4dce95eac71c26bb38ae8423fbc80d79db91d2b2ffaea8c4e46276a"
+upstream_git_blob_oid = "35f0c44ec42117a3a96b20ebe05cca3012a083e9"
+local_git_hash_object = "35f0c44ec42117a3a96b20ebe05cca3012a083e9"
+status = "exact"
+exact_copy = true
+purpose = "GGML type discriminants and public type-trait ABI reference."
+
+[[files]]
+local_path = "ggml/src/ggml-common.h"
+upstream_path = "ggml/src/ggml-common.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "af255601767325f087313fa84b9435cb77aeec37df6b61b98d9ecc65f29fb4a0"
+external_worktree_sha256 = "c7a75460f797ac4406f8af4a9e318c2f0674b7b660a1c81ce5b4c019dc29a89a"
+local_sha256 = "af255601767325f087313fa84b9435cb77aeec37df6b61b98d9ecc65f29fb4a0"
+upstream_git_blob_oid = "83f9118da84a6a61967a5c8a04af9893130a4e95"
+local_git_hash_object = "83f9118da84a6a61967a5c8a04af9893130a4e95"
+status = "exact"
+exact_copy = true
+purpose = "Packed Q4_K, Q5_K, IQ2_S, and IQ3_S block-layout reference."
+
+[[files]]
+local_path = "ggml/src/gguf.cpp"
+upstream_path = "ggml/src/gguf.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "cc86dbbb4ea1a01b78e3aba879a8e0654dd23aa8d8d73ff56241443eb188bf6d"
+external_worktree_sha256 = "f3b43112d683b5275e1870dddff16443f07087b86470f5f2496bebdc1200c4bf"
+local_sha256 = "cc86dbbb4ea1a01b78e3aba879a8e0654dd23aa8d8d73ff56241443eb188bf6d"
+upstream_git_blob_oid = "9f9e4fe5d104fe753e9fbc646efb231c3d78ee76"
+local_git_hash_object = "9f9e4fe5d104fe753e9fbc646efb231c3d78ee76"
+status = "exact"
+exact_copy = true
+purpose = "GGUF metadata, tensor-directory, and alignment behavior reference."
+
+[[files]]
+local_path = "src/llama-arch.cpp"
+upstream_path = "src/llama-arch.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "52d6e524cef2e015d6c88b880df697dffd3237b7ef79bc558f7634aa23c01c70"
+external_worktree_sha256 = "9fa9038cafa498d047de1ff77eb32e4111aa38e14119ddf99a2105eb5b413d9e"
+local_sha256 = "52d6e524cef2e015d6c88b880df697dffd3237b7ef79bc558f7634aa23c01c70"
+upstream_git_blob_oid = "c0170678507073532c42d82a5baf43d238f57e53"
+local_git_hash_object = "c0170678507073532c42d82a5baf43d238f57e53"
+status = "exact"
+exact_copy = true
+purpose = "Architecture, metadata-key, and tensor-name mapping reference."
+
+[[files]]
+local_path = "src/llama-arch.h"
+upstream_path = "src/llama-arch.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "486f5b2136e29e39c59137f5795e0001fb8587f12c9b287244b5c816377ddce8"
+external_worktree_sha256 = "5a0bc1c3d96e4da7f744ec42f17b6716361d84d4b89ad18f39ebbbdaa686360f"
+local_sha256 = "486f5b2136e29e39c59137f5795e0001fb8587f12c9b287244b5c816377ddce8"
+upstream_git_blob_oid = "1c9aebb0bbdc0c06409b9e33bb320fe087e5b6dc"
+local_git_hash_object = "1c9aebb0bbdc0c06409b9e33bb320fe087e5b6dc"
+status = "exact"
+exact_copy = true
+purpose = "Architecture and tensor-role declaration reference, including hy_v3."
+
+[[files]]
+local_path = "src/llama-graph.cpp"
+upstream_path = "src/llama-graph.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "c83460b64090c19fb7737c9f1e8fea0e96af6179b5c5ce2de1aced1f8c1c55fe"
+external_worktree_sha256 = "287a7a897dbebc58389ef0e22d7ceaea1394597249b2cc744451aeaaaefe113e"
+local_sha256 = "c83460b64090c19fb7737c9f1e8fea0e96af6179b5c5ce2de1aced1f8c1c55fe"
+upstream_git_blob_oid = "6d1c8f4e42a83a746e8c3ead00d216b2335f2df4"
+local_git_hash_object = "6d1c8f4e42a83a746e8c3ead00d216b2335f2df4"
+status = "exact"
+exact_copy = true
+purpose = "Shared attention, MoE, and expert-routing graph-helper reference."
+
+[[files]]
+local_path = "src/llama-graph.h"
+upstream_path = "src/llama-graph.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "7010cc58f4d776d31b8c0f491125082ca50bb611f6e02fc98a264cb90cb46549"
+external_worktree_sha256 = "ecf1d7d289012e6f716e843dce1921e79ba3801403024e4970efd3ee890eaa08"
+local_sha256 = "7010cc58f4d776d31b8c0f491125082ca50bb611f6e02fc98a264cb90cb46549"
+upstream_git_blob_oid = "7ed490ce6728893b64d3ef1176ef88e4b1370acf"
+local_git_hash_object = "7ed490ce6728893b64d3ef1176ef88e4b1370acf"
+status = "exact"
+exact_copy = true
+purpose = "Shared graph-helper declaration reference."
+
+[[files]]
+local_path = "src/llama-kv-cache-dsa.cpp"
+upstream_path = "src/llama-kv-cache-dsa.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "871e08b668b9af88e2139e0ee3ac305e3f7e0cc218a43e9277edadbf8830f95e"
+external_worktree_sha256 = "6ab0fafd7b72c2a84ba652147329c54d086a93cf6cf4c8973139fe8c08e3d78c"
+local_sha256 = "871e08b668b9af88e2139e0ee3ac305e3f7e0cc218a43e9277edadbf8830f95e"
+upstream_git_blob_oid = "241c50365a1371f6641525348d72169bf874d169"
+local_git_hash_object = "241c50365a1371f6641525348d72169bf874d169"
+status = "exact"
+exact_copy = true
+purpose = "Inactive legacy DSA KV-cache implementation reference; not used by Hy3 ingestion."
+
+[[files]]
+local_path = "src/llama-kv-cache-dsa.h"
+upstream_path = "src/llama-kv-cache-dsa.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "4ce577e70a0d9c2621966f95ffcc94d61cd2de0f6f8acaab0b5ebdd70f93a234"
+external_worktree_sha256 = "3af2b6b49551c702a69247bac287359bcf3884925b439b7e1f47ea5e21725205"
+local_sha256 = "4ce577e70a0d9c2621966f95ffcc94d61cd2de0f6f8acaab0b5ebdd70f93a234"
+upstream_git_blob_oid = "e2b330993b848ed46101807b6d14c53e824053f2"
+local_git_hash_object = "e2b330993b848ed46101807b6d14c53e824053f2"
+status = "exact"
+exact_copy = true
+purpose = "Inactive legacy DSA KV-cache declaration reference; not used by Hy3 ingestion."
+
+[[files]]
+local_path = "src/llama-kv-cache.cpp"
+upstream_path = "src/llama-kv-cache.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "4ee0076fb49c2e3b08bd004c4da085eabe85c7fdaaa21ad5fc607b08eddc78df"
+external_worktree_sha256 = "09092e797154b145b9527b69e3239db6e2a4907316cd3b59f6e66532792ddd13"
+local_sha256 = "4ee0076fb49c2e3b08bd004c4da085eabe85c7fdaaa21ad5fc607b08eddc78df"
+upstream_git_blob_oid = "44cb1668dacf74d899a1658a9a51ba825a281510"
+local_git_hash_object = "44cb1668dacf74d899a1658a9a51ba825a281510"
+status = "exact"
+exact_copy = true
+purpose = "Inactive general KV-cache systems reference; not used by Hy3 ingestion."
+
+[[files]]
+local_path = "src/llama-model.cpp"
+upstream_path = "src/llama-model.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "3d55155fee0fdcbb7ded920e71dfba6eb3d820559295c5f4da8824d5cc8c8c78"
+external_worktree_sha256 = "a327e46eeb47716af7e74158c74f882a94a574d69311b0c1186d93a7675e1528"
+local_sha256 = "3d55155fee0fdcbb7ded920e71dfba6eb3d820559295c5f4da8824d5cc8c8c78"
+upstream_git_blob_oid = "be0a0df55d625205835d28b60eb1f895e9de2d1e"
+local_git_hash_object = "be0a0df55d625205835d28b60eb1f895e9de2d1e"
+status = "exact"
+exact_copy = true
+purpose = "Architecture selection and shared model-loading behavior reference."
+
+[[files]]
+local_path = "src/models/glm-dsa.cpp"
+upstream_path = "src/models/glm-dsa.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "cbe84e8988d931739a017ba5e2b064454572693f1fbdcd66dc73d44e28118d25"
+external_worktree_sha256 = "dabeef793c81e595de11fe9fb348689248c4619daa49bf8bbd792f3a56c01513"
+local_sha256 = "cbe84e8988d931739a017ba5e2b064454572693f1fbdcd66dc73d44e28118d25"
+upstream_git_blob_oid = "df190e1f634b93ab97789bb6741fbd1b2035301b"
+local_git_hash_object = "df190e1f634b93ab97789bb6741fbd1b2035301b"
+status = "exact"
+exact_copy = true
+purpose = "Inactive legacy GLM/DSA model reference retained for historical comparison; not used by Hy3 ingestion."
+
+[[files]]
+local_path = "LICENSE"
+upstream_path = "LICENSE"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_sha256 = "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+external_worktree_sha256 = "bcd8ec749126d45cb06737d0690295d73df4b6e7e194205bcf91190368f27285"
+local_sha256 = "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+upstream_git_blob_oid = "e7dca554bcb802f98408383a864404e3aa4eacca"
+local_git_hash_object = "e7dca554bcb802f98408383a864404e3aa4eacca"
+status = "exact"
+exact_copy = true
+purpose = "Preserved upstream MIT license and copyright notice for the retained reference subset."
+
+[[oracle_sources]]
+upstream_path = "ggml/src/ggml.c"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "a7d1fe7d94be4bee3df47f0d710fbfdb62087d1f"
+upstream_sha256 = "84b5c2608cf70f7beacdaa67d3cc4b58d34654d57d3d50268ff4b9eb83a643e0"
+external_worktree_sha256 = "3947981fc3aafd684b57e1f41548c60d87230bfa8c7ba66b741943d9f42b60d9"
+external_only = true
+purpose = "F32 type-trait and bit-preserving ABI identity evidence for the fixture harness."
+
+[[oracle_sources]]
+upstream_path = "ggml/src/ggml-quants.c"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "1ebc50a763f16db909de37090da38cc8c0fdde94"
+upstream_sha256 = "07143d7068936ae46b3c528b2f3d4bbb666e74d88992165716174d243573965d"
+external_worktree_sha256 = "c5829ed1b4ced3970964464eaf2c985af38008fa76c91af15f4f63ef4447ab1f"
+external_only = true
+purpose = "Pinned reference dequantizers, Q8_K reference quantizer, scale helper, and IQ tables' consumers."
+
+[[oracle_sources]]
+upstream_path = "ggml/src/ggml-quants.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "75188f1af180e3592f3c94bc4077989fb817c359"
+upstream_sha256 = "28ae5fca1f3be636b36cd6c4fa2ca74fd42d229bfbd5352eaf66f3727bb8a6da"
+external_worktree_sha256 = "f7676dc8160f940034cf092c6a0b27577e3677c6153cb476bb2bc78fb5f85762"
+external_only = true
+purpose = "Reference dequantizer and Q8_K quantizer declarations used by the development oracle."
+
+[[oracle_sources]]
+upstream_path = "ggml/src/ggml-impl.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "62b76abbcec9e71c860ba1a99d79b501bad26b93"
+upstream_sha256 = "2ed56e264202906d107e26d08eabb242d3107b026ebfb78096fa1e5f94bdbbb8"
+external_worktree_sha256 = "165258ef041cae44c3848f783402634717d3c97f6c3b112dd543cb1bde5c561a"
+external_only = true
+purpose = "Pinned FP16 conversion and low-level quantization helper declarations."
+
+[[oracle_sources]]
+upstream_path = "ggml/src/ggml-cpu/ggml-cpu.c"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "491316f7491252248d6f74a60440d3efa7aa6177"
+upstream_sha256 = "f2abcaf7f627a2d8a4b7744a7128b210dad0d147fc92cb94ce9cbaed2945e84a"
+external_worktree_sha256 = "b5e41ad21600eab8c56dfbc871df9c9e0ba23821b8ff35533ac1ec5dc42a21f5"
+external_only = true
+purpose = "Dispatch and type-trait evidence only; explicitly excluded from the oracle build."
+
+[[oracle_sources]]
+upstream_path = "ggml/src/ggml-cpu/ggml-cpu-impl.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "5d1ca5ffcc368b9f0249d6cf6ccc4549bb9a3ab4"
+upstream_sha256 = "e7008069e3e46f1db5e3d2eaafb4ddec3c7d0ece5c0454f99c5a8e33a50f20ba"
+external_worktree_sha256 = "e35cc31320be8ba0412e8e577e54aa419e6030a4348a84097239d9d1795ec299"
+external_only = true
+purpose = "Scalar CPU quantization support ABI and helper evidence."
+
+[[oracle_sources]]
+upstream_path = "ggml/src/ggml-cpu/quants.c"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "5e36459f8cbc5900b375d2189414307393471a6b"
+upstream_sha256 = "a61f1011e49d05b5f99d352b158d5b8e36cf008294bb0db309f72bdd7f1d4e35"
+external_worktree_sha256 = "459ecbb123f56bd9230b2681430e7591764a5587b6b83f058f002bf6511fdbad"
+external_only = true
+purpose = "Directly compiled pinned generic scalar Q4_K, Q5_K, IQ2_S, and IQ3_S by Q8_K dot kernels."
+
+[[oracle_sources]]
+upstream_path = "ggml/src/ggml-cpu/quants.h"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "93ea7eeffe5b00ad2c612aac49b7983c12949525"
+upstream_sha256 = "918d6755b3e601ec7bb83c7dbf1d73304490651ccbb4072b0d31a2b45df751da"
+external_worktree_sha256 = "90dfb1484e17e22eb2e7824c0d5c029e678e8c6469ca176be3962db36bc06d73"
+external_only = true
+purpose = "Pinned declarations for the four generic scalar dot kernels."
+
+[[oracle_sources]]
+upstream_path = "src/models/hy-v3.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "47a0beaf217f19219e3e8fb8d5c35664625d7c73"
+upstream_sha256 = "fcc0822f3291db653a3a723614f525bf96204161517abec5a56a3f5d1d8ac6c3"
+external_worktree_sha256 = "4da02af4a1428a2461dc04b5713eb9154829f385211dec9bafecd4486c670c89"
+external_only = true
+purpose = "Hy3 graph and selected packed-tensor execution reference."
+
+[[oracle_sources]]
+upstream_path = "tests/test-quantize-fns.cpp"
+revision = "b77d646751d01c0962bc203b6809e9d94f7d50b7"
+upstream_git_blob_oid = "9510ac14ce00805e1689a8c8b16b6dd6c329911c"
+upstream_sha256 = "851f302b1f9338f2cc259f765cc36d702f13f564ee0fb6050043c7041a55c13b"
+external_worktree_sha256 = "309817cbbcb2275746fa9ee8e43c8e7f6ab1f619e91da2490e219734fe04d892"
+external_only = true
+purpose = "Upstream differential quantization-test methodology and tolerance reference."

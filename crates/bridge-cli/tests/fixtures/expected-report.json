@@ -1,0 +1,712 @@
+{
+  "files": [
+    {
+      "path": "<in-memory-test-shard>",
+      "ordinal": 0,
+      "count": 1,
+      "version": 3,
+      "endianness": "little",
+      "metadata_count": 45,
+      "alignment": 32,
+      "logical_size": 96019311104,
+      "data_offset": 5160192
+    }
+  ],
+  "gguf": {
+    "version": 3,
+    "endianness": "little",
+    "authoritative_metadata_count": 45,
+    "tensor_count": 1278,
+    "alignment": 32,
+    "encoded_tensor_bytes": 96014150912
+  },
+  "general": {
+    "architecture": "hy_v3",
+    "name": "Hy3 Src",
+    "license": "apache-2.0",
+    "size_label": "192x10B",
+    "quantization_version": 2,
+    "file_type": 29
+  },
+  "tokenizer": {
+    "model": "gpt2",
+    "pretokenizer": "hunyuan-dense",
+    "token_count": 120832,
+    "merge_count": 119758,
+    "token_type_count": 120832,
+    "bos_token_id": 120000,
+    "eos_token_id": 120025,
+    "padding_token_id": 120002,
+    "separator_token_id": 120007,
+    "has_chat_template": true
+  },
+  "hy3": {
+    "block_count": 80,
+    "context_length": 1048576,
+    "embedding_length": 4096,
+    "dense_ffn_length": 13312,
+    "expert_ffn_length": 1536,
+    "shared_expert_ffn_length": 1536,
+    "attention_head_count": 64,
+    "attention_kv_head_count": 8,
+    "key_length": 128,
+    "value_length": 128,
+    "rms_epsilon": 0.00001,
+    "expert_count": 192,
+    "expert_used_count": 8,
+    "expert_weights_norm": true,
+    "expert_gating_func": 2,
+    "expert_weights_scale": 2.826,
+    "rope_base": 11158840.0,
+    "rope_scaling_type": "yarn",
+    "yarn_factor": 4.0,
+    "yarn_original_context": 262144,
+    "vocabulary_size": 120832,
+    "has_mtp": false
+  },
+  "tensors": {
+    "total": {
+      "count": 1278,
+      "logical_elements": 295033543488,
+      "encoded_bytes": 96014150912
+    },
+    "dense_layer_0_ffn": {
+      "count": 3,
+      "logical_elements": 163577856,
+      "encoded_bytes": 58359808
+    },
+    "routed_experts": {
+      "count": 237,
+      "logical_elements": 286286413824,
+      "encoded_bytes": 92361719808
+    },
+    "shared_experts": {
+      "count": 237,
+      "logical_elements": 1491075072,
+      "encoded_bytes": 480362496
+    },
+    "attention": {
+      "count": 320,
+      "logical_elements": 6039797760,
+      "encoded_bytes": 2309488640
+    },
+    "routers": {
+      "count": 158,
+      "logical_elements": 62143296,
+      "encoded_bytes": 248573184
+    },
+    "embeddings": {
+      "count": 1,
+      "logical_elements": 494927872,
+      "encoded_bytes": 212664320
+    },
+    "norms": {
+      "count": 321,
+      "logical_elements": 679936,
+      "encoded_bytes": 2719744
+    },
+    "output": {
+      "count": 1,
+      "logical_elements": 494927872,
+      "encoded_bytes": 340262912
+    }
+  },
+  "types": {
+    "F32": {
+      "count": 479,
+      "logical_elements": 62823232,
+      "encoded_bytes": 251292928
+    },
+    "IQ2_S": {
+      "count": 627,
+      "logical_elements": 284841476096,
+      "encoded_bytes": 91238285312
+    },
+    "IQ3_S": {
+      "count": 91,
+      "logical_elements": 9298771968,
+      "encoded_bytes": 3995566080
+    },
+    "Q4_K": {
+      "count": 80,
+      "logical_elements": 335544320,
+      "encoded_bytes": 188743680
+    },
+    "Q5_K": {
+      "count": 1,
+      "logical_elements": 494927872,
+      "encoded_bytes": 340262912
+    }
+  },
+  "roles": {
+    "attention_k": {
+      "count": 80,
+      "logical_elements": 335544320,
+      "encoded_bytes": 107479040
+    },
+    "attention_k_norm": {
+      "count": 80,
+      "logical_elements": 10240,
+      "encoded_bytes": 40960
+    },
+    "attention_norm": {
+      "count": 80,
+      "logical_elements": 327680,
+      "encoded_bytes": 1310720
+    },
+    "attention_output": {
+      "count": 80,
+      "logical_elements": 2684354560,
+      "encoded_bytes": 1153433600
+    },
+    "attention_q": {
+      "count": 80,
+      "logical_elements": 2684354560,
+      "encoded_bytes": 859832320
+    },
+    "attention_q_norm": {
+      "count": 80,
+      "logical_elements": 10240,
+      "encoded_bytes": 40960
+    },
+    "attention_v": {
+      "count": 80,
+      "logical_elements": 335544320,
+      "encoded_bytes": 188743680
+    },
+    "dense_down": {
+      "count": 1,
+      "logical_elements": 54525952,
+      "encoded_bytes": 23429120
+    },
+    "dense_gate": {
+      "count": 1,
+      "logical_elements": 54525952,
+      "encoded_bytes": 17465344
+    },
+    "dense_up": {
+      "count": 1,
+      "logical_elements": 54525952,
+      "encoded_bytes": 17465344
+    },
+    "ffn_norm": {
+      "count": 80,
+      "logical_elements": 327680,
+      "encoded_bytes": 1310720
+    },
+    "output": {
+      "count": 1,
+      "logical_elements": 494927872,
+      "encoded_bytes": 340262912
+    },
+    "output_norm": {
+      "count": 1,
+      "logical_elements": 4096,
+      "encoded_bytes": 16384
+    },
+    "routed_down": {
+      "count": 79,
+      "logical_elements": 95428804608,
+      "encoded_bytes": 31227641856
+    },
+    "routed_gate": {
+      "count": 79,
+      "logical_elements": 95428804608,
+      "encoded_bytes": 30567038976
+    },
+    "routed_up": {
+      "count": 79,
+      "logical_elements": 95428804608,
+      "encoded_bytes": 30567038976
+    },
+    "router_input": {
+      "count": 79,
+      "logical_elements": 62128128,
+      "encoded_bytes": 248512512
+    },
+    "router_selection_bias": {
+      "count": 79,
+      "logical_elements": 15168,
+      "encoded_bytes": 60672
+    },
+    "shared_down": {
+      "count": 79,
+      "logical_elements": 497025024,
+      "encoded_bytes": 161955840
+    },
+    "shared_gate": {
+      "count": 79,
+      "logical_elements": 497025024,
+      "encoded_bytes": 159203328
+    },
+    "shared_up": {
+      "count": 79,
+      "logical_elements": 497025024,
+      "encoded_bytes": 159203328
+    },
+    "token_embedding": {
+      "count": 1,
+      "logical_elements": 494927872,
+      "encoded_bytes": 212664320
+    }
+  },
+  "layers": {
+    "0": {
+      "count": 11,
+      "logical_elements": 239083776,
+      "encoded_bytes": 87262208
+    },
+    "1": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1331676928
+    },
+    "2": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1331676928
+    },
+    "3": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1331676928
+    },
+    "4": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1331676928
+    },
+    "5": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1330988800
+    },
+    "6": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "7": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "8": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "9": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "10": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "11": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "12": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "13": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "14": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "15": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "16": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "17": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "18": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "19": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "20": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "21": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "22": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "23": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "24": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "25": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "26": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "27": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "28": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "29": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "30": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "31": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "32": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "33": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "34": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "35": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "36": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "37": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "38": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "39": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "40": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "41": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "42": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "43": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "44": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "45": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "46": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "47": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "48": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "49": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "50": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "51": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "52": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "53": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "54": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "55": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "56": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "57": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "58": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "59": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "60": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "61": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "62": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "63": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "64": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "65": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "66": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "67": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "68": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "69": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "70": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "71": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "72": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "73": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "74": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "75": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "76": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "77": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "78": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    },
+    "79": {
+      "count": 16,
+      "logical_elements": 3719045568,
+      "encoded_bytes": 1198868224
+    }
+  },
+  "expert_storage": {
+    "expert_count": 192,
+    "routed_banks": {
+      "count": 237,
+      "logical_elements": 286286413824,
+      "encoded_bytes": 92361719808
+    },
+    "shared_experts": {
+      "count": 237,
+      "logical_elements": 1491075072,
+      "encoded_bytes": 480362496
+    },
+    "routed_projections": {
+      "routed_down/IQ2_S": {
+        "projection": "routed_down",
+        "physical_type": "IQ2_S",
+        "tensor_count": 74,
+        "expert_count": 192,
+        "slab_logical_elements": 6291456,
+        "slab_bytes": 2015232
+      },
+      "routed_down/IQ3_S": {
+        "projection": "routed_down",
+        "physical_type": "IQ3_S",
+        "tensor_count": 5,
+        "expert_count": 192,
+        "slab_logical_elements": 6291456,
+        "slab_bytes": 2703360
+      },
+      "routed_gate/IQ2_S": {
+        "projection": "routed_gate",
+        "physical_type": "IQ2_S",
+        "tensor_count": 79,
+        "expert_count": 192,
+        "slab_logical_elements": 6291456,
+        "slab_bytes": 2015232
+      },
+      "routed_up/IQ2_S": {
+        "projection": "routed_up",
+        "physical_type": "IQ2_S",
+        "tensor_count": 79,
+        "expert_count": 192,
+        "slab_logical_elements": 6291456,
+        "slab_bytes": 2015232
+      }
+    }
+  },
+  "unsupported_execution_types": [
+    "F32",
+    "IQ2_S",
+    "IQ3_S",
+    "Q4_K",
+    "Q5_K"
+  ],
+  "warnings": [
+    "Tensor payload bytes were not read or verified."
+  ]
+}
