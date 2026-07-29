@@ -49,12 +49,25 @@ the complete-file SHA-256, dequantization correctness, or inference.
 Never run a complete-file hash command against the sparse mirror and report
 that result as the selected artifact's checksum.
 
-## Later complete-file verification
+## Complete-file verification
 
-After obtaining the actual complete artifact at a different path, verify both
-length and digest. This command is documented for that future complete file;
-it has not been executed against the sparse mirror:
+On 2026-07-29 the actual complete artifact was acquired at
+`D:\LightBridge\Models\hy3-1M-IQ2_M.gguf`, outside the repository. The
+acceptance workflow confirmed:
+
+- logical and allocated length `96_019_311_104` bytes;
+- SHA-256
+  `1c02c57e4dc8b55a254a5329c6c248fa7bf741644b6936898793f272d3292ea7`;
+- `sparse = false`;
+- `compressed = false`;
+- schema validity and full payload readability.
+
+The complete payload subsequently passed direct and sidecar inference plus
+pinned llama.cpp b10153 greedy-token parity. See
+[`../full-model-acceptance-2026-07-29.md`](../full-model-acceptance-2026-07-29.md).
+The following check applies only to the complete file, never the sparse
+mirror:
 
 ```powershell
-rtk powershell -NoProfile -Command "$model = Get-Item -LiteralPath 'D:\models\hy3-1M-IQ2_M.gguf'; if ($model.Length -ne 96019311104) { throw \"unexpected length: $($model.Length)\" }; $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $model.FullName).Hash.ToLowerInvariant(); if ($hash -ne '1c02c57e4dc8b55a254a5329c6c248fa7bf741644b6936898793f272d3292ea7') { throw \"unexpected SHA-256: $hash\" }; 'complete model length and SHA-256 verified'"
+rtk powershell -NoProfile -Command "$model = Get-Item -LiteralPath 'D:\LightBridge\Models\hy3-1M-IQ2_M.gguf'; if ($model.Length -ne 96019311104) { throw \"unexpected length: $($model.Length)\" }; $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $model.FullName).Hash.ToLowerInvariant(); if ($hash -ne '1c02c57e4dc8b55a254a5329c6c248fa7bf741644b6936898793f272d3292ea7') { throw \"unexpected SHA-256: $hash\" }; 'complete model length and SHA-256 verified'"
 ```

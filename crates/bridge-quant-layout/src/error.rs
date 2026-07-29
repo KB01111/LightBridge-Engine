@@ -54,6 +54,14 @@ pub enum QuantError {
         field: &'static str,
         bits: u16,
     },
+
+    /// A caller-provided activation contains an infinite or NaN value.
+    #[error("Q8_K activation lane {index} is non-finite (F32 bits {bits:#010x})")]
+    NonFiniteActivation { index: usize, bits: u32 },
+
+    /// An encoded Q8_K activation block has an infinite or NaN scale.
+    #[error("Q8_K block {block_index} has non-finite F32 scale bits {bits:#010x}")]
+    NonFiniteQ8Scale { block_index: usize, bits: u32 },
 }
 
 pub(crate) type Result<T> = std::result::Result<T, QuantError>;

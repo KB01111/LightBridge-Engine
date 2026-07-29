@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Deterministic inspection reports for checked LightBridge model ingestion."
+description = "Inspect, validate, prepare, chat, serve, benchmark, and manage LightBridge Hy3 models."
 
 [[bin]]
 name = "bridge"
@@ -13,14 +13,26 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+bridge-cache.workspace = true
 bridge-core.workspace = true
+bridge-format.workspace = true
 bridge-gguf.workspace = true
 bridge-gguf-split.workspace = true
+bridge-io-windows.workspace = true
+bridge-kernels-cpu.workspace = true
+bridge-kernels-reference.workspace = true
 bridge-model-hy3.workspace = true
+bridge-prepare.workspace = true
+bridge-runtime.workspace = true
+bridge-server.workspace = true
+bridge-tokenizer.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+windows-sys.workspace = true
 
 [dev-dependencies]
 bridge-gguf-split = { workspace = true, features = ["test-utils"] }

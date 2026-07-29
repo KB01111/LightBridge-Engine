@@ -551,17 +551,28 @@ fn unsupported_subcommand_is_rejected_by_clap() {
 }
 
 #[test]
-fn root_help_advertises_only_the_implemented_command() {
+fn root_help_advertises_every_implemented_product_command() {
     let output = bridge(&["--help"]);
 
     assert!(output.status.success(), "stderr: {}", utf8(&output.stderr));
     assert!(output.stderr.is_empty());
     let stdout = utf8(&output.stdout);
-    assert!(stdout.contains("inspect-gguf"), "stdout: {stdout}");
-    for command in ["run", "serve", "chat", "prepare"] {
+    for command in [
+        "inspect-gguf",
+        "doctor",
+        "plan",
+        "validate",
+        "prepare",
+        "tokenize",
+        "detokenize",
+        "chat",
+        "serve",
+        "bench",
+        "cache",
+    ] {
         assert!(
-            !stdout.lines().any(|line| line.trim_start().starts_with(command)),
-            "root help advertises unimplemented {command:?} command:\n{stdout}"
+            stdout.lines().any(|line| line.trim_start().starts_with(command)),
+            "root help omits implemented {command:?} command:\n{stdout}"
         );
     }
 }
@@ -575,4 +586,135 @@ fn inspect_help_documents_model_and_json_flags() {
     let stdout = utf8(&output.stdout);
     assert!(stdout.contains("--model <PATH>"), "stdout: {stdout}");
     assert!(stdout.contains("--json"), "stdout: {stdout}");
+}
+
+#[test]
+fn chat_help_documents_persistent_sessions_and_cpu_backend_controls() {
+    let output = bridge(&["chat", "--help"]);
+    assert!(output.status.success(), "stderr: {}", utf8(&output.stderr));
+    let stdout = utf8(&output.stdout);
+    for flag in [
+        "--backend",
+        "--cpu-threads",
+        "--cache-heat",
+        "--chat-json",
+        "--session-in",
+        "--session-out",
+        "--session-max-mib",
+    ] {
+        assert!(stdout.contains(flag), "chat help omits {flag}:\n{stdout}");
+    }
+}
+
+#[test]
+fn bench_help_documents_true_in_process_cold_warm_measurement() {
+    let output = bridge(&["bench", "--help"]);
+    assert!(output.status.success(), "stderr: {}", utf8(&output.stderr));
+    let stdout = utf8(&output.stdout);
+    assert!(
+        stdout.contains("--cold-warm"),
+        "bench help omits --cold-warm:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("warm-state"),
+        "bench help does not distinguish resident-cache warmth:\n{stdout}"
+    );
+}
+
+#[test]
+fn doctor_json_reports_live_host_and_honest_backend_capabilities() {
+    let output = bridge(&["doctor", "--json"]);
+    assert!(output.status.success(), "stderr: {}", utf8(&output.stderr));
+    assert!(output.stderr.is_empty(), "stderr: {}", utf8(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["cpu"]["logical_processors"].as_u64().unwrap() >= 1);
+    assert_eq!(report["capabilities"]["scalar_reference"], true);
+    assert_eq!(report["capabilities"]["cpu_parallel_backend"], true);
+    assert!(
+        report["capabilities"]["cpu_parallel_default_threads"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+    assert!(report["capabilities"]["cpu_simd_backend"].is_boolean());
+    assert_eq!(report["capabilities"]["parallel_expert_prefetch"], true);
+    assert_eq!(report["capabilities"]["persistent_expert_heat"], true);
+    assert_eq!(report["capabilities"]["cuda_backend"], false);
+    assert_eq!(report["capabilities"]["grouped_prefill"], false);
+    assert_eq!(report["capabilities"]["persistent_kv"], true);
+    assert_eq!(report["capabilities"]["mtp_acceleration"], false);
+    assert_eq!(report["capabilities"]["server"], true);
+}
+
+#[test]
+fn plan_reports_sparse_header_boundary_and_lazy_kv_accounting() {
+    let directory = TestDirectory::new();
+    let model = directory.path("selected.gguf");
+    write_selected_fixture(&model).unwrap();
+
+    let output = bridge(&[
+        "plan",
+        "--model",
+        model.to_str().unwrap(),
+        "--context",
+        "1024",
+        "--cache-mib",
+        "64",
+        "--json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", utf8(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["context_capacity"], 1024);
+    assert!(report["kv_bytes_per_token"].as_u64().unwrap() > 0);
+    assert!(report["first_kv_page_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(report["memory_headroom_bytes"], 512 * 1024 * 1024_u64);
+    assert!(report["minimum_startup_memory_bytes"].as_u64().unwrap() > 0);
+    assert!(report["memory_preflight_passes"].is_boolean());
+    assert!(report["files"][0]["sparse"].as_bool().unwrap());
+    assert!(report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|warning| warning.as_str().unwrap().contains("sparse header mirror")));
+}
+
+#[test]
+fn validation_distinguishes_schema_from_authenticated_payload() {
+    let directory = TestDirectory::new();
+    let model = directory.path("selected.gguf");
+    write_selected_fixture(&model).unwrap();
+
+    let header = bridge(&["validate", "--model", model.to_str().unwrap(), "--json"]);
+    assert!(header.status.success(), "stderr: {}", utf8(&header.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&header.stdout).unwrap();
+    assert_eq!(report["schema_valid"], true);
+    assert_eq!(report["payload_authenticated"], false);
+    assert_eq!(report["files"][0]["sparse"], true);
+
+    let payload = bridge(&["validate", "--model", model.to_str().unwrap(), "--payload"]);
+    let stderr = assert_application_error(&payload);
+    assert!(stderr.contains("sparse/incomplete payload"), "stderr: {stderr}");
+}
+
+#[test]
+fn prepare_rejects_sparse_sources_before_hashing_or_writing_outputs() {
+    let directory = TestDirectory::new();
+    let model = directory.path("selected.gguf");
+    let output = directory.path("selected.experts");
+    let manifest = directory.path("selected.experts.json");
+    write_selected_fixture(&model).unwrap();
+
+    let result = bridge(&[
+        "prepare",
+        "--model",
+        model.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+        "--manifest",
+        manifest.to_str().unwrap(),
+    ]);
+    let stderr = assert_application_error(&result);
+    assert!(stderr.contains("sparse/incomplete source"), "stderr: {stderr}");
+    assert!(!output.exists());
+    assert!(!manifest.exists());
 }

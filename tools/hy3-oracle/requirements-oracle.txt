@@ -1,0 +1,4 @@
+# Development-only oracle environment. Production crates do not import these.
+numpy==2.4.6
+torch==2.12.0
+transformers @ git+https://github.com/huggingface/transformers.git@3e80155a968c1080f11b2710e8b31741ac5ab0ed

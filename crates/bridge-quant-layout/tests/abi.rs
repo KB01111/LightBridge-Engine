@@ -1,6 +1,7 @@
 use bridge_quant_layout::{
-    decode_block_into, decode_f32_block_into, decode_q4_k_block_into, decode_q5_k_block_into,
-    decode_row_into, layout, GgmlType, QuantError, QuantLayout,
+    decode_block_into, decode_f32_block_into, decode_iq2_s_block_into, decode_iq3_s_block_into,
+    decode_q4_k_block_into, decode_q5_k_block_into, decode_row_into, layout, GgmlType, QuantError,
+    QuantLayout,
 };
 
 const SENTINEL_BITS: [u32; 4] = [0x7fc0_00a5, 0xff80_00b6, 0x8000_0000, 0x3f12_3456];
@@ -21,7 +22,9 @@ fn valid_block(ty: GgmlType) -> Vec<u8> {
         GgmlType::F32 => 4,
         GgmlType::Q4_K => 144,
         GgmlType::Q5_K => 176,
-        _ => panic!("test helper only accepts Task 2 types"),
+        GgmlType::IQ2_S => 82,
+        GgmlType::IQ3_S => 110,
+        _ => panic!("test helper only accepts reference decoder types"),
     };
     vec![0; size]
 }
@@ -51,6 +54,8 @@ fn supported_layouts_are_exact_and_match_bridge_core() {
         (GgmlType::F32, 0_u32, 1_usize, 4_usize),
         (GgmlType::Q4_K, 12, 256, 144),
         (GgmlType::Q5_K, 13, 256, 176),
+        (GgmlType::IQ3_S, 21, 256, 110),
+        (GgmlType::IQ2_S, 22, 256, 82),
     ];
 
     for (ty, id, block_elements, block_bytes) in cases {
@@ -71,10 +76,13 @@ fn supported_layouts_are_exact_and_match_bridge_core() {
 }
 
 #[test]
-fn every_non_task_2_type_is_rejected_without_mutation() {
+fn every_non_reference_decoder_type_is_rejected_without_mutation() {
     let mut rejected = 0;
     for &ty in GgmlType::ALL {
-        if matches!(ty, GgmlType::F32 | GgmlType::Q4_K | GgmlType::Q5_K) {
+        if matches!(
+            ty,
+            GgmlType::F32 | GgmlType::Q4_K | GgmlType::Q5_K | GgmlType::IQ2_S | GgmlType::IQ3_S
+        ) {
             continue;
         }
         rejected += 1;
@@ -96,7 +104,7 @@ fn every_non_task_2_type_is_rejected_without_mutation() {
         );
         assert_unchanged(&row_before, &row_output);
     }
-    assert_eq!(rejected, GgmlType::ALL.len() - 3);
+    assert_eq!(rejected, GgmlType::ALL.len() - 5);
 }
 
 #[test]
@@ -105,6 +113,8 @@ fn every_truncated_and_overlong_encoded_block_is_rejected_atomically() {
         (GgmlType::F32, 4_usize, 1_usize),
         (GgmlType::Q4_K, 144, 256),
         (GgmlType::Q5_K, 176, 256),
+        (GgmlType::IQ2_S, 82, 256),
+        (GgmlType::IQ3_S, 110, 256),
     ];
 
     let mut truncation_cases = 0;
@@ -138,7 +148,7 @@ fn every_truncated_and_overlong_encoded_block_is_rejected_atomically() {
         );
         assert_unchanged(&before, &output);
     }
-    assert_eq!(truncation_cases, 4 + 144 + 176);
+    assert_eq!(truncation_cases, 4 + 144 + 176 + 82 + 110);
 }
 
 #[test]
@@ -147,6 +157,8 @@ fn every_truncated_and_overlong_output_block_is_rejected_atomically() {
         (GgmlType::F32, 1_usize),
         (GgmlType::Q4_K, 256),
         (GgmlType::Q5_K, 256),
+        (GgmlType::IQ2_S, 256),
+        (GgmlType::IQ3_S, 256),
     ];
 
     let mut truncation_cases = 0;
@@ -181,7 +193,7 @@ fn every_truncated_and_overlong_output_block_is_rejected_atomically() {
         );
         assert_unchanged(&before, &output);
     }
-    assert_eq!(truncation_cases, 1 + 256 + 256);
+    assert_eq!(truncation_cases, 1 + 256 * 4);
 }
 
 #[test]
@@ -190,6 +202,8 @@ fn focused_entry_points_enforce_exact_lengths_atomically() {
         (GgmlType::F32, 4, 1, decode_f32_block_into),
         (GgmlType::Q4_K, 144, 256, decode_q4_k_block_into),
         (GgmlType::Q5_K, 176, 256, decode_q5_k_block_into),
+        (GgmlType::IQ2_S, 82, 256, decode_iq2_s_block_into),
+        (GgmlType::IQ3_S, 110, 256, decode_iq3_s_block_into),
     ];
 
     for &(ty, block_bytes, block_elements, decode) in cases {
@@ -430,6 +444,25 @@ fn every_nonfinite_binary16_scale_is_rejected_atomically() {
             }
         }
     }
+
+    for (ty, block_bytes) in [(GgmlType::IQ2_S, 82), (GgmlType::IQ3_S, 110)] {
+        for half_bits in nonfinite {
+            let mut encoded = vec![0_u8; block_bytes];
+            encoded[0..2].copy_from_slice(&half_bits.to_le_bytes());
+            let mut output = sentinel(256);
+            let before = bits(&output);
+            assert_eq!(
+                decode_block_into(ty, &encoded, &mut output),
+                Err(QuantError::NonFiniteScale {
+                    ty,
+                    block_index: 0,
+                    field: "d",
+                    bits: half_bits,
+                })
+            );
+            assert_unchanged(&before, &output);
+        }
+    }
 }
 
 #[test]
@@ -456,6 +489,28 @@ fn row_prescans_every_scale_before_writing_any_lane() {
                 );
                 assert_unchanged(&before, &output);
             }
+        }
+    }
+
+    for (ty, block_bytes) in [(GgmlType::IQ2_S, 82_usize), (GgmlType::IQ3_S, 110)] {
+        for block_index in 0..3 {
+            let mut encoded = vec![0_u8; block_bytes * 3];
+            let bits_value = 0x7e01_u16;
+            let offset = block_index * block_bytes;
+            encoded[offset..offset + 2].copy_from_slice(&bits_value.to_le_bytes());
+
+            let mut output = sentinel(768);
+            let before = bits(&output);
+            assert_eq!(
+                decode_row_into(ty, &encoded, 768, &mut output),
+                Err(QuantError::NonFiniteScale {
+                    ty,
+                    block_index,
+                    field: "d",
+                    bits: bits_value,
+                })
+            );
+            assert_unchanged(&before, &output);
         }
     }
 }

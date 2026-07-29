@@ -295,7 +295,11 @@ pub fn build_report(set: &GgufSet) -> Result<InspectionReport, ReportError> {
 
     let authoritative_metadata_count =
         checked_len(primary.metadata.len(), "authoritative GGUF metadata count")?;
-    let unsupported_execution_types = types.keys().cloned().collect();
+    let unsupported_execution_types = types
+        .keys()
+        .filter(|ty| !matches!(ty.as_str(), "F32" | "Q4_K" | "Q5_K" | "IQ2_S" | "IQ3_S"))
+        .cloned()
+        .collect();
     let expert_storage = ExpertStorageReport {
         expert_count: model.config().expert_count,
         routed_banks: tensors.routed_experts.clone(),

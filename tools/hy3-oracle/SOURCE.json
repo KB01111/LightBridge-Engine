@@ -1,0 +1,26 @@
+{
+  "transformers": {
+    "repository": "https://github.com/huggingface/transformers",
+    "commit": "3e80155a968c1080f11b2710e8b31741ac5ab0ed",
+    "release": "5.6.0",
+    "license": "Apache-2.0",
+    "files_consulted": [
+      "src/transformers/models/hy_v3/configuration_hy_v3.py",
+      "src/transformers/models/hy_v3/modeling_hy_v3.py",
+      "src/transformers/modeling_rope_utils.py"
+    ]
+  },
+  "llama_cpp": {
+    "repository": "https://github.com/ggml-org/llama.cpp",
+    "release": "b10153",
+    "commit": "b77d646751d01c0962bc203b6809e9d94f7d50b7",
+    "license": "MIT",
+    "purpose": "development-only normal-graph llama-Q8_K oracle",
+    "files_consulted": [
+      "include/llama.h",
+      "ggml/include/ggml-backend.h",
+      "src/models/hy-v3.cpp",
+      "src/llama-graph.cpp"
+    ]
+  }
+}

@@ -1,4 +1,6 @@
 use crate::error::Result;
+use crate::iq2_s::decode_iq2_s_validated;
+use crate::iq3_s::decode_iq3_s_validated;
 use crate::{GgmlType, QuantError};
 use half::f16;
 
@@ -7,6 +9,8 @@ const F32_BLOCK_BYTES: usize = 4;
 const K_BLOCK_ELEMENTS: usize = 256;
 const Q4_K_BLOCK_BYTES: usize = 144;
 const Q5_K_BLOCK_BYTES: usize = 176;
+const IQ2_S_BLOCK_BYTES: usize = 82;
+const IQ3_S_BLOCK_BYTES: usize = 110;
 
 const SCALE_BYTES: usize = 12;
 const Q4_K_SCALES_OFFSET: usize = 4;
@@ -32,6 +36,8 @@ pub fn layout(ty: GgmlType) -> Result<QuantLayout> {
         GgmlType::F32 => (F32_BLOCK_ELEMENTS, F32_BLOCK_BYTES),
         GgmlType::Q4_K => (K_BLOCK_ELEMENTS, Q4_K_BLOCK_BYTES),
         GgmlType::Q5_K => (K_BLOCK_ELEMENTS, Q5_K_BLOCK_BYTES),
+        GgmlType::IQ2_S => (K_BLOCK_ELEMENTS, IQ2_S_BLOCK_BYTES),
+        GgmlType::IQ3_S => (K_BLOCK_ELEMENTS, IQ3_S_BLOCK_BYTES),
         _ => return Err(QuantError::UnsupportedType { ty }),
     };
 
@@ -113,6 +119,16 @@ pub fn decode_q5_k_block_into(encoded: &[u8], output: &mut [f32]) -> Result<()> 
     decode_block_into(GgmlType::Q5_K, encoded, output)
 }
 
+/// Decodes exactly one packed IQ2_S block.
+pub fn decode_iq2_s_block_into(encoded: &[u8], output: &mut [f32]) -> Result<()> {
+    decode_block_into(GgmlType::IQ2_S, encoded, output)
+}
+
+/// Decodes exactly one packed IQ3_S block.
+pub fn decode_iq3_s_block_into(encoded: &[u8], output: &mut [f32]) -> Result<()> {
+    decode_block_into(GgmlType::IQ3_S, encoded, output)
+}
+
 fn checked_row_lengths(
     block_count: usize,
     block_bytes: usize,
@@ -159,14 +175,24 @@ fn validate_lengths(
     Ok(())
 }
 
-fn validate_scales(ty: GgmlType, encoded: &[u8], block_count: usize, block_bytes: usize) -> Result<()> {
+pub(crate) fn validate_scales(
+    ty: GgmlType,
+    encoded: &[u8],
+    block_count: usize,
+    block_bytes: usize,
+) -> Result<()> {
     if ty == GgmlType::F32 {
         return Ok(());
     }
 
+    let fields: &[(&str, usize)] = match ty {
+        GgmlType::Q4_K | GgmlType::Q5_K => &[("d", 0), ("dmin", 2)],
+        GgmlType::IQ2_S | GgmlType::IQ3_S => &[("d", 0)],
+        _ => return Err(QuantError::UnsupportedType { ty }),
+    };
     for block_index in 0..block_count {
         let block_start = block_index * block_bytes;
-        for (field, offset) in [("d", 0_usize), ("dmin", 2_usize)] {
+        for &(field, offset) in fields {
             let bits = u16::from_le_bytes([encoded[block_start + offset], encoded[block_start + offset + 1]]);
             if !f16::from_bits(bits).is_finite() {
                 return Err(QuantError::NonFiniteScale {
@@ -186,6 +212,8 @@ fn decode_validated_block(ty: GgmlType, encoded: &[u8], output: &mut [f32]) -> R
         GgmlType::F32 => decode_f32_validated(encoded, output),
         GgmlType::Q4_K => decode_q4_k_validated(encoded, output),
         GgmlType::Q5_K => decode_q5_k_validated(encoded, output),
+        GgmlType::IQ2_S => decode_iq2_s_validated(encoded, output),
+        GgmlType::IQ3_S => decode_iq3_s_validated(encoded, output),
         _ => return Err(QuantError::UnsupportedType { ty }),
     }
     Ok(())
@@ -200,7 +228,7 @@ fn finite_scale(encoded: &[u8], offset: usize) -> f32 {
     f16::from_bits(u16::from_le_bytes([encoded[offset], encoded[offset + 1]])).to_f32()
 }
 
-fn scale_min(scales: &[u8], index: usize) -> (u8, u8) {
+pub(crate) fn scale_min(scales: &[u8], index: usize) -> (u8, u8) {
     if index < 4 {
         (scales[index] & 0x3f, scales[index + 4] & 0x3f)
     } else {

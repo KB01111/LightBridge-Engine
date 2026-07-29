@@ -179,7 +179,11 @@ pub fn render_text(report: &InspectionReport) -> String {
     writeln!(
         output,
         "  unsupported execution types: {}",
-        report.unsupported_execution_types.join(", ")
+        if report.unsupported_execution_types.is_empty() {
+            "none".to_owned()
+        } else {
+            report.unsupported_execution_types.join(", ")
+        }
     )
     .unwrap();
 

@@ -22,6 +22,15 @@ pub struct TensorSpec {
 }
 
 impl TensorSpec {
+    pub fn new(name: impl Into<String>, role: Hy3TensorRole, shape: Vec<u64>, ty: GgmlType) -> Self {
+        Self {
+            name: name.into(),
+            role,
+            shape,
+            ty,
+        }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -284,23 +293,34 @@ pub fn validate_selected_iq2_m_tensor_descriptors(
     validate_descriptor_iter(config, tensors.len(), tensors.iter())
 }
 
-pub(crate) fn validate_tensor_locations(
-    config: &Hy3Config,
-    tensors: &[TensorLocation],
-) -> Result<(), Hy3Error> {
-    validate_descriptor_iter(
-        config,
-        tensors.len(),
-        tensors.iter().map(TensorLocation::descriptor),
-    )
-}
-
 fn validate_descriptor_iter<'a>(
     config: &Hy3Config,
     tensor_count: usize,
     tensors: impl IntoIterator<Item = &'a TensorDesc>,
 ) -> Result<(), Hy3Error> {
     let expected_schema = generate_schema_for_validated_selected_iq2_m(config)?;
+    validate_descriptor_iter_against(config, &expected_schema, tensor_count, tensors)
+}
+
+pub(crate) fn validate_tensor_locations_against_schema(
+    config: &Hy3Config,
+    expected_schema: &[TensorSpec],
+    tensors: &[TensorLocation],
+) -> Result<(), Hy3Error> {
+    validate_descriptor_iter_against(
+        config,
+        expected_schema,
+        tensors.len(),
+        tensors.iter().map(TensorLocation::descriptor),
+    )
+}
+
+fn validate_descriptor_iter_against<'a>(
+    config: &Hy3Config,
+    expected_schema: &[TensorSpec],
+    tensor_count: usize,
+    tensors: impl IntoIterator<Item = &'a TensorDesc>,
+) -> Result<(), Hy3Error> {
     if tensor_count > MAX_SCHEMA_TENSOR_COUNT {
         return Err(Hy3Error::TensorDirectoryCount {
             expected: expected_schema.len(),
@@ -325,8 +345,8 @@ fn validate_descriptor_iter<'a>(
     for expected in expected_schema {
         let Some(actual_tensor) = actual.remove(expected.name()) else {
             return Err(Hy3Error::MissingTensor {
-                name: expected.name,
-                expected_shape: expected.shape,
+                name: expected.name.clone(),
+                expected_shape: expected.shape.clone(),
                 expected_type: expected.ty.name(),
             });
         };
@@ -335,14 +355,14 @@ fn validate_descriptor_iter<'a>(
         }
         if actual_tensor.shape() != expected.shape {
             return Err(Hy3Error::TensorShape {
-                name: expected.name,
-                expected: expected.shape,
+                name: expected.name.clone(),
+                expected: expected.shape.clone(),
                 actual: actual_tensor.shape().to_vec(),
             });
         }
         if actual_tensor.ty() != expected.ty {
             return Err(Hy3Error::TensorType {
-                name: expected.name,
+                name: expected.name.clone(),
                 expected: expected.ty.name(),
                 actual: actual_tensor.ty().name(),
             });
@@ -353,6 +373,54 @@ fn validate_descriptor_iter<'a>(
         return Err(Hy3Error::UnexpectedTensor {
             name: name.to_owned(),
         });
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_explicit_schema(config: &Hy3Config, schema: &[TensorSpec]) -> Result<(), Hy3Error> {
+    validate_schema_config(config)?;
+    if schema.is_empty() || schema.len() > MAX_SCHEMA_TENSOR_COUNT {
+        return Err(Hy3Error::TensorDirectoryCount {
+            expected: 1,
+            actual: schema.len(),
+        });
+    }
+    let mut names = HashMap::new();
+    names
+        .try_reserve(schema.len())
+        .map_err(|_| Hy3Error::AllocationFailed {
+            context: "explicit profile schema names",
+            requested: schema.len(),
+        })?;
+    for spec in schema {
+        if names.insert(spec.name(), ()).is_some() {
+            return Err(Hy3Error::DuplicateTensor {
+                name: spec.name().to_owned(),
+            });
+        }
+        let classified = Hy3TensorRole::classify(spec.name(), config.block_count)?;
+        if classified != spec.role() {
+            return Err(Hy3Error::InvalidTensorName {
+                name: spec.name().to_owned(),
+                expected: "a tensor name matching its explicit semantic role",
+            });
+        }
+        if spec.shape().is_empty() || spec.shape().len() > 3 || spec.shape().contains(&0) {
+            return Err(Hy3Error::TensorShape {
+                name: spec.name().to_owned(),
+                expected: vec![1],
+                actual: spec.shape().to_vec(),
+            });
+        }
+        if spec.role().is_routed_expert()
+            && (spec.shape().len() != 3 || spec.shape()[2] != u64::from(config.expert_count))
+        {
+            return Err(Hy3Error::ExpertDimension {
+                name: spec.name().to_owned(),
+                expected: config.expert_count,
+                actual: spec.shape().get(2).copied().unwrap_or(0),
+            });
+        }
     }
     Ok(())
 }

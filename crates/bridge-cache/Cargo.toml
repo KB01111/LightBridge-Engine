@@ -1,0 +1,13 @@
+[package]
+name = "bridge-cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Fixed-ceiling deduplicating compressed-byte cache for LightBridge."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

@@ -1,8 +1,16 @@
+use crate::schema::{generate_schema_for_validated_selected_iq2_m, validate_explicit_schema, TensorSpec};
 use crate::{Hy3Config, Hy3Error};
 
 #[derive(Debug, Clone)]
 pub struct Hy3Profile {
     expected: Hy3Config,
+    schema: ProfileSchema,
+}
+
+#[derive(Debug, Clone)]
+enum ProfileSchema {
+    SelectedIq2M,
+    Explicit(Vec<TensorSpec>),
 }
 
 impl Hy3Profile {
@@ -31,7 +39,21 @@ impl Hy3Profile {
                 yarn_original_context: 262_144,
                 vocabulary_size: 120_832,
             },
+            schema: ProfileSchema::SelectedIq2M,
         }
+    }
+
+    /// Creates an explicit non-production validation profile.
+    ///
+    /// The schema remains exact: every tensor name, semantic role, shape, and
+    /// physical type is authorized up front. The selected checkpoint continues
+    /// to use [`Self::selected_iq2_m`] and cannot be weakened through this API.
+    pub fn explicit(expected: Hy3Config, schema: Vec<TensorSpec>) -> Result<Self, Hy3Error> {
+        validate_explicit_schema(&expected, &schema)?;
+        Ok(Self {
+            expected,
+            schema: ProfileSchema::Explicit(schema),
+        })
     }
 
     pub const fn config(&self) -> &Hy3Config {
@@ -136,6 +158,13 @@ impl Hy3Profile {
             self.expected.vocabulary_size,
             actual.vocabulary_size,
         )
+    }
+
+    pub(crate) fn tensor_schema(&self) -> Result<Vec<TensorSpec>, Hy3Error> {
+        match &self.schema {
+            ProfileSchema::SelectedIq2M => generate_schema_for_validated_selected_iq2_m(&self.expected),
+            ProfileSchema::Explicit(schema) => Ok(schema.clone()),
+        }
     }
 }
 
