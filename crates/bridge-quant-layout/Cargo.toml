@@ -11,3 +11,6 @@ description = "Safe packed GGML layout validation and scalar reference decoding 
 bridge-core.workspace = true
 thiserror.workspace = true
 half.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "bridge-kernels-reference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Allocation-explicit scalar reference kernels for LightBridge."
+
+[dependencies]
+bridge-core.workspace = true
+bridge-model-hy3.workspace = true
+bridge-quant-layout.workspace = true
+bridge-kv-gqa.workspace = true
+rayon.workspace = true
+thiserror.workspace = true

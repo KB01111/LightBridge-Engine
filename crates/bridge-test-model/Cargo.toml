@@ -1,0 +1,25 @@
+[package]
+name = "bridge-test-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Deterministic reduced Hy3 model and differential fixtures for LightBridge."
+
+[dependencies]
+bridge-core.workspace = true
+bridge-gguf = { workspace = true, features = ["test-utils"] }
+bridge-gguf-split = { workspace = true, features = ["test-utils"] }
+bridge-kernels-reference.workspace = true
+bridge-kv-gqa.workspace = true
+bridge-model-hy3.workspace = true
+bridge-quant-layout.workspace = true
+bridge-tokenizer.workspace = true
+half.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true

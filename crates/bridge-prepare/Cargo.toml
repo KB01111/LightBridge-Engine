@@ -1,0 +1,20 @@
+[package]
+name = "bridge-prepare"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Direct expert reads and lossless sidecar preparation for LightBridge."
+
+[dependencies]
+bridge-format.workspace = true
+bridge-gguf-split.workspace = true
+bridge-io-windows.workspace = true
+bridge-model-hy3.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+bridge-test-model.workspace = true

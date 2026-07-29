@@ -1,0 +1,27 @@
+[package]
+name = "bridge-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Bounded local OpenAI-compatible HTTP server for LightBridge."
+
+[dependencies]
+axum.workspace = true
+bridge-runtime.workspace = true
+bridge-tokenizer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+bridge-gguf.workspace = true
+bridge-kernels-reference.workspace = true
+bridge-test-model.workspace = true
+http-body-util.workspace = true
+http.workspace = true
+tower.workspace = true

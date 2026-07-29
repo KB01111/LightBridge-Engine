@@ -374,10 +374,7 @@ fn full_selected_profile_has_exact_checked_aggregates() {
     assert_eq!(projections["routed_down/IQ2_S"].tensor_count, 74);
     assert_eq!(projections["routed_down/IQ2_S"].slab_bytes, 2_015_232);
 
-    assert_eq!(
-        report.unsupported_execution_types,
-        ["F32", "IQ2_S", "IQ3_S", "Q4_K", "Q5_K"]
-    );
+    assert!(report.unsupported_execution_types.is_empty());
     assert_eq!(
         report.warnings,
         ["Tensor payload bytes were not read or verified."]

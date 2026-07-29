@@ -17,6 +17,8 @@ Cargo.lock.bak
 *.gguf
 *.gguf.*
 *.safetensors
+__pycache__/
+*.py[cod]
 .vs/
 .idea/
 .vscode/

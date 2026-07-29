@@ -1,0 +1,13 @@
+[package]
+name = "bridge-kernels-cpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Bounded CPU execution pool and ISA dispatch for LightBridge kernels."
+
+[dependencies]
+bridge-kernels-reference.workspace = true
+rayon.workspace = true
+thiserror.workspace = true

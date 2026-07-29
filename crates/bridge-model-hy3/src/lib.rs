@@ -2,6 +2,7 @@
 
 mod config;
 mod profile;
+mod routing;
 mod schema;
 mod tensor_role;
 
@@ -10,17 +11,16 @@ use std::ops::Range;
 use bridge_gguf::GgufValueType;
 use bridge_gguf_split::{GgufSet, TensorLocation};
 use config::{validate_exact_replica, SELECTED_METADATA_KEYS};
-use schema::{generate_schema_for_validated_selected_iq2_m, validate_tensor_locations};
+use schema::validate_tensor_locations_against_schema;
 
 pub use config::{resolve_config, Hy3Config};
 pub use profile::Hy3Profile;
+pub use routing::{route_experts_into, RouteCandidate, RoutedExpert};
 pub use schema::{
     checked_expert_slab, generate_selected_iq2_m_schema, validate_selected_iq2_m_tensor_descriptors,
     TensorSpec,
 };
 pub use tensor_role::Hy3TensorRole;
-
-const SELECTED_TENSOR_COUNT: usize = 1_278;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Hy3Error {
@@ -138,6 +138,23 @@ pub enum Hy3Error {
     TensorDirectoryCount { expected: usize, actual: usize },
     #[error("allocation failed while reserving {requested} entries for {context}")]
     AllocationFailed { context: &'static str, requested: usize },
+    #[error("routing field {field} has actual length {actual}, expected {expected}")]
+    RoutingLength {
+        field: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("routing top-k has actual value {expert_used_count}, expected 1..={expert_count}")]
+    RoutingTopK {
+        expert_count: usize,
+        expert_used_count: usize,
+    },
+    #[error("routing field {field} index {index} is non-finite (F32 bits {bits:#010x})")]
+    NonFiniteRoutingValue {
+        field: &'static str,
+        index: usize,
+        bits: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,24 +216,40 @@ impl ValidatedHy3Model {
     pub const fn has_mtp(&self) -> bool {
         self.has_mtp
     }
+
+    /// Finds the unique validated tensor assigned to a semantic graph role.
+    pub fn tensor_for_role(&self, role: Hy3TensorRole) -> Option<&Hy3Tensor> {
+        self.tensors.iter().find(|tensor| tensor.role == role)
+    }
 }
 
 pub fn validate_selected_model(set: &GgufSet) -> Result<ValidatedHy3Model, Hy3Error> {
+    validate_model_with_profile(set, &Hy3Profile::selected_iq2_m())
+}
+
+/// Validates a GGUF set against an exact, explicit Hy3 profile.
+///
+/// This is used by deterministic reduced models and future separately
+/// authorized checkpoints. It does not alter the selected-model wrapper.
+pub fn validate_model_with_profile(
+    set: &GgufSet,
+    profile: &Hy3Profile,
+) -> Result<ValidatedHy3Model, Hy3Error> {
     let metadata = set.files().first().ok_or(Hy3Error::EmptySet)?.parsed();
     let config = resolve_config(metadata)?;
-    Hy3Profile::selected_iq2_m().validate(&config)?;
+    profile.validate(&config)?;
     validate_later_shard_metadata(set, &config)?;
 
+    let schema = profile.tensor_schema()?;
     let directory = set.tensors().ordered();
-    if directory.len() != SELECTED_TENSOR_COUNT {
+    if directory.len() != schema.len() {
         return Err(Hy3Error::TensorDirectoryCount {
-            expected: SELECTED_TENSOR_COUNT,
+            expected: schema.len(),
             actual: directory.len(),
         });
     }
-    validate_tensor_locations(&config, directory)?;
+    validate_tensor_locations_against_schema(&config, &schema, directory)?;
 
-    let schema = generate_schema_for_validated_selected_iq2_m(&config)?;
     let mut tensors = Vec::new();
     tensors
         .try_reserve_exact(schema.len())

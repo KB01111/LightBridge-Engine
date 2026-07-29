@@ -699,13 +699,7 @@
       }
     }
   },
-  "unsupported_execution_types": [
-    "F32",
-    "IQ2_S",
-    "IQ3_S",
-    "Q4_K",
-    "Q5_K"
-  ],
+  "unsupported_execution_types": [],
   "warnings": [
     "Tensor payload bytes were not read or verified."
   ]

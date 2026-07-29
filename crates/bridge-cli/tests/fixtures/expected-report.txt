@@ -208,7 +208,7 @@ Expert storage
     slab bytes: 2015232 bytes (1.92 MiB)
 
 Execution status
-  unsupported execution types: F32, IQ2_S, IQ3_S, Q4_K, Q5_K
+  unsupported execution types: none
 
 Warnings
   - Tensor payload bytes were not read or verified.
