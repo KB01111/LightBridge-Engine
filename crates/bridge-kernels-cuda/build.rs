@@ -7,7 +7,7 @@ fn main() {
 
     let allow_unsupported =
         std::env::var_os("LIGHTBRIDGE_CUDA_ALLOW_UNSUPPORTED_MSVC").is_some_and(|value| value == "1");
-    if cfg!(windows) && newest_visual_studio_major().is_some_and(|major| major >= 18) && !allow_unsupported {
+    if cfg!(windows) && !supported_visual_studio_present() && !allow_unsupported {
         println!(
             "cargo:warning=CUDA native canary rejected: Visual Studio 2026 is outside CUDA 13.1's \
              supported host-compiler range"
@@ -52,4 +52,32 @@ fn newest_visual_studio_major() -> Option<u32> {
         .next()?
         .parse()
         .ok()
+}
+
+fn supported_visual_studio_present() -> bool {
+    let Some(root) = std::env::var_os("ProgramFiles(x86)") else {
+        return false;
+    };
+    let vswhere = std::path::PathBuf::from(root)
+        .join("Microsoft Visual Studio")
+        .join("Installer")
+        .join("vswhere.exe");
+    let Ok(output) = std::process::Command::new(vswhere)
+        .args(["-products", "*", "-property", "installationVersion"])
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .split('.')
+                .next()
+                .and_then(|major| major.parse::<u32>().ok())
+        })
+        .any(|major| (16..=17).contains(&major))
 }

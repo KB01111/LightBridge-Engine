@@ -66,10 +66,13 @@ fn unbuffered_iocp_enforces_and_satisfies_device_alignment() {
     file.read_many(&mut reads, &ReadCancellation::new()).unwrap();
     assert_eq!(lease.as_slice()[0], 0);
 
-    let mut ordinary = vec![0_u8; slot_bytes];
+    let mut aligned_lease = pool.try_acquire().unwrap().unwrap();
     let mut invalid = [OverlappedRead {
         offset: 1,
-        buffer: &mut ordinary,
+        buffer: &mut aligned_lease.as_mut_slice()[..slot_bytes],
     }];
-    assert!(file.read_many(&mut invalid, &ReadCancellation::new()).is_err());
+    match file.read_many(&mut invalid, &ReadCancellation::new()) {
+        Err(ReadError::UnbufferedOffsetAlignment { offset: 1, .. }) => {}
+        result => panic!("expected UnbufferedOffsetAlignment error, got {result:?}"),
+    }
 }

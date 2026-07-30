@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 
@@ -128,18 +128,29 @@ impl CpuBackend {
             .num_threads(config.threads)
             .thread_name(|index| format!("lightbridge-cpu-{index}"));
         let affinity_failed = Arc::new(AtomicBool::new(false));
+        let started_count = Arc::new(AtomicUsize::new(0));
         if !cpu_set_ids.is_empty() {
             let selected = Arc::new(cpu_set_ids.to_vec());
             let failed = Arc::clone(&affinity_failed);
+            let started = Arc::clone(&started_count);
             builder = builder.start_handler(move |index| {
                 if pin_current_thread(selected[index]).is_none() {
                     failed.store(true, Ordering::Release);
                 }
+                started.fetch_add(1, Ordering::Release);
+            });
+        } else {
+            let started = Arc::clone(&started_count);
+            builder = builder.start_handler(move |_index| {
+                started.fetch_add(1, Ordering::Release);
             });
         }
         let pool = builder
             .build()
             .map_err(|error| CpuBackendError::Build(error.to_string()))?;
+        while started_count.load(Ordering::Acquire) < config.threads {
+            std::hint::spin_loop();
+        }
         if affinity_failed.load(Ordering::Acquire) {
             return Err(CpuBackendError::Affinity);
         }
@@ -201,7 +212,7 @@ pub enum CpuBackendError {
     CpuSetCount { threads: usize, cpu_set_ids: usize },
     #[error("CPU affinity IDs must be unique")]
     DuplicateCpuSet,
-    #[error("Windows rejected at least one persistent worker affinity assignment")]
+    #[error("OS rejected at least one persistent worker affinity assignment")]
     Affinity,
     #[error("failed to build bounded CPU thread pool: {0}")]
     Build(String),

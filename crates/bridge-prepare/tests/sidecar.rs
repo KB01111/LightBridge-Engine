@@ -82,9 +82,13 @@ fn direct_index_and_reads_use_exact_validated_expert_slabs() {
         [bytes.gate.as_slice(), bytes.up.as_slice(), bytes.down.as_slice()].concat()
     );
     let short_length = direct_into.len() - 1;
-    assert!(store
-        .read_expert_into(key, &mut direct_into[..short_length], &ReadCancellation::new())
-        .is_err());
+    match store.read_expert_into(key, &mut direct_into[..short_length], &ReadCancellation::new()) {
+        Err(SidecarError::DestinationLength { expected, actual }) => {
+            assert_eq!(expected, direct_into.len());
+            assert_eq!(actual, short_length);
+        }
+        result => panic!("expected DestinationLength error, got {result:?}"),
+    }
 }
 
 #[test]
@@ -140,6 +144,14 @@ fn both_sidecar_layouts_are_lossless_and_source_bound() {
                 ]
                 .concat()
             );
+            let short_length = tight.len() - 1;
+            match sidecar.read_expert_into(key, &mut tight[..short_length], &ReadCancellation::new()) {
+                Err(SidecarError::DestinationLength { expected, actual }) => {
+                    assert_eq!(expected, tight.len());
+                    assert_eq!(actual, short_length);
+                }
+                result => panic!("expected DestinationLength error, got {result:?}"),
+            }
         }
     }
 }

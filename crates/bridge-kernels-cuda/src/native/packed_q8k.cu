@@ -96,14 +96,14 @@ __device__ float dot_q4_q5(
     const u8 *q8,
     int block_count
 ) {
-    int block_bytes = kind == 0 ? 144 : 176;
+    int block_bytes = kind == 0 ? Q4_K_BLOCK_BYTES : Q5_K_BLOCK_BYTES;
     float lane_totals[8] = {
         0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f
     };
     float total = 0.0f;
     for (int block = 0; block < block_count; ++block) {
         const u8 *weight = weights + block * block_bytes;
-        const u8 *activation = q8 + block * 292;
+        const u8 *activation = q8 + block * Q8_K_BLOCK_BYTES;
         int scales[8];
         int minimums[8];
         for (int index = 0; index < 8; ++index) {
@@ -112,14 +112,14 @@ __device__ float dot_q4_q5(
 
         int minimum_sum = 0;
         for (int group = 0; group < 16; ++group) {
-            minimum_sum += (int)read_i16(activation + 260 + group * 2)
+            minimum_sum += (int)read_i16(activation + Q8_BLOCK_SUMS_OFFSET + group * 2)
                 * minimums[group / 2];
         }
 
         int lane_sums[8] = {0, 0, 0, 0, 0, 0, 0, 0};
         for (int offset = 0; offset < 256; ++offset) {
             int lane = offset & 7;
-            int activation_value = (int)(i8)activation[4 + offset];
+            int activation_value = (int)(i8)activation[Q8_QUANTS_OFFSET + offset];
             int weight_value = q4_q5_quant(kind, weight, offset);
             lane_sums[lane] += scales[offset / 32]
                 * activation_value

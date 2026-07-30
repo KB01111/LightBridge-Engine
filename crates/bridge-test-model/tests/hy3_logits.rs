@@ -72,10 +72,20 @@ fn two_step_teacher_forced_sequence_has_stable_named_outputs() {
     let oracle: Oracle = serde_json::from_str(include_str!("fixtures/hy3-oracle-v1.json")).unwrap();
     assert_eq!(oracle.format, "lightbridge-reduced-hy3-oracle-v1");
     assert_eq!(oracle.token_ids, [3, 7]);
-    for (expected_mode, mode) in oracle.modes.iter().zip([
+    use bridge_kernels_cpu::CpuCapabilities;
+    let mut modes = vec![
         ReferenceExecutionMode::DequantF32,
         ReferenceExecutionMode::LlamaQ8K,
-    ]) {
+    ];
+    let caps = CpuCapabilities::detect();
+    if caps.avx_vnni_dot_kernel_available() {
+        modes.push(ReferenceExecutionMode::CpuParallelAvxVnni);
+    }
+    if caps.avx512_dot_kernel_available() {
+        modes.push(ReferenceExecutionMode::CpuParallelAvx512Vnni);
+    }
+    let available_count = oracle.modes.len().min(modes.len());
+    for (expected_mode, mode) in oracle.modes.iter().take(available_count).zip(modes.iter().copied()) {
         assert_eq!(
             expected_mode.mode,
             match mode {

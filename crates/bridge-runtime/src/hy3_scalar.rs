@@ -323,11 +323,8 @@ impl Hy3ScalarModel {
 
     pub fn cpu_simd_active(&self) -> bool {
         match self.active_execution_mode() {
-            ReferenceExecutionMode::CpuParallelAvxVnni => {
-                CpuCapabilities::detect().avx_vnni_dot_kernel_available()
-            }
-            ReferenceExecutionMode::CpuParallelAvx512Vnni => {
-                CpuCapabilities::detect().avx512_dot_kernel_available()
+            ReferenceExecutionMode::CpuParallelAvxVnni | ReferenceExecutionMode::CpuParallelAvx512Vnni => {
+                self.cpu_backend.as_ref().is_some_and(CpuBackend::simd_active)
             }
             ReferenceExecutionMode::CudaQ8K => false,
             _ => self.cpu_backend.as_ref().is_some_and(CpuBackend::simd_active),

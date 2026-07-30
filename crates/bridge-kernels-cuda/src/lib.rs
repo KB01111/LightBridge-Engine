@@ -116,10 +116,14 @@ pub struct CudaArenaConfig {
 
 impl CudaArenaConfig {
     pub fn validate(self) -> Result<(), &'static str> {
-        if self.pinned_read_slots == 0 || self.device_staging_arenas != 2 || self.slot_bytes == 0 {
-            return Err(
-                "CUDA requires non-zero pinned slots, exactly two staging arenas, and non-zero slots",
-            );
+        if self.pinned_read_slots == 0 {
+            return Err("CUDA requires non-zero pinned_read_slots");
+        }
+        if self.device_staging_arenas != 2 {
+            return Err("CUDA requires exactly two device_staging_arenas");
+        }
+        if self.slot_bytes == 0 {
+            return Err("CUDA requires non-zero slot_bytes");
         }
         if self.reserved_vram_bytes < 1_280 * 1024 * 1024 {
             return Err("CUDA must reserve at least 1.25 GiB of VRAM");

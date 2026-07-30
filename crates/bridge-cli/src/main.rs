@@ -865,6 +865,7 @@ fn probe_nvidia_pnp(_nvidia_smi_detail: &str) -> Option<NvidiaStatus> {
     None
 }
 
+#[cfg(any(windows, test))]
 fn parse_nvidia_pnp(text: &str) -> Option<(String, String, String)> {
     text.replace('\r', "")
         .split("\n\n")
@@ -918,6 +919,7 @@ fn probe_cuda_toolchain() -> ProbeStatus {
         available: true,
         detail: nvcc,
     };
+    #[cfg(windows)]
     ProbeStatus {
         available: false,
         detail: format!("{nvcc}; no compatible MSVC installation was discovered"),
@@ -1616,8 +1618,13 @@ fn bench(args: BenchRunArgs) -> Result<()> {
     let engine = open_engine(&runtime)?;
     let engine_open_duration = benchmark_started.elapsed();
     let initial_backend = engine.model().backend_name();
+    let fingerprint = if hardware_profile.is_some() {
+        Some(current_hardware_fingerprint()?)
+    } else {
+        None
+    };
     if let Some(path) = hardware_profile.as_deref() {
-        validate_hardware_profile(path, &runtime, &engine)?;
+        validate_hardware_profile(path, &runtime, &engine, fingerprint.as_ref().unwrap())?;
     }
     let mut trace = ChromeTrace::default();
     trace.push_complete(
@@ -2623,6 +2630,7 @@ fn tune_buffered_storage(
         measurements.push(measurement);
     }
     let best_queue_depth = best.context("storage tuner produced no candidates")?.0;
+    #[cfg(windows)]
     let mut rejections = Vec::new();
     #[cfg(windows)]
     {
@@ -2712,7 +2720,12 @@ fn tune_iocp_storage(
     Ok(measurements)
 }
 
-fn validate_hardware_profile(path: &Path, runtime: &RuntimeArgs, engine: &Hy3ChatEngine) -> Result<()> {
+fn validate_hardware_profile(
+    path: &Path,
+    runtime: &RuntimeArgs,
+    engine: &Hy3ChatEngine,
+    fingerprint: &HardwareFingerprintV1,
+) -> Result<()> {
     let bytes = read_bounded(path)?;
     let profile: TuningProfileV1 =
         serde_json::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))?;
@@ -2735,7 +2748,7 @@ fn validate_hardware_profile(path: &Path, runtime: &RuntimeArgs, engine: &Hy3Cha
         _ => bail!("--sidecar-data and --sidecar-manifest must be provided together"),
     };
     profile
-        .validate_current(&current_hardware_fingerprint()?, &model, sidecar.as_ref())
+        .validate_current(fingerprint, &model, sidecar.as_ref())
         .with_context(|| format!("hardware profile {} is not valid for this run", path.display()))
 }
 

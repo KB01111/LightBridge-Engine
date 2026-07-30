@@ -186,8 +186,20 @@ fn every_available_cpu_backend_is_bit_exact_to_the_scalar_oracle() {
 #[test]
 fn validated_matrix_reuses_one_complete_validation_across_rows() {
     let rows = 3;
-    let weights = Q4.repeat(rows);
-    let expected = vec_dot_q8_k(GgmlType::Q4_K, Q4, Q8, 768).unwrap();
+    let mut weights = Vec::new();
+    for row in 0..rows {
+        let mut row_data = Q4.to_vec();
+        for byte in &mut row_data[12..] {
+            *byte = byte.wrapping_add((row as u8).wrapping_mul(17));
+        }
+        weights.extend_from_slice(&row_data);
+    }
+    let expected: Vec<f32> = (0..rows)
+        .map(|row| {
+            let row_start = row * Q4.len();
+            vec_dot_q8_k(GgmlType::Q4_K, &weights[row_start..row_start + Q4.len()], Q8, 768).unwrap()
+        })
+        .collect();
 
     for backend in [
         CpuDotBackend::Scalar,
@@ -202,7 +214,7 @@ fn validated_matrix_reuses_one_complete_validation_across_rows() {
         assert_eq!(matrix.output_rows(), rows);
         assert_eq!(matrix.backend(), backend);
         for row in 0..rows {
-            assert_eq!(matrix.dot_row(row).unwrap().to_bits(), expected.to_bits());
+            assert_eq!(matrix.dot_row(row).unwrap().to_bits(), expected[row].to_bits());
         }
         assert_eq!(
             matrix.dot_row(rows),

@@ -331,6 +331,7 @@ mod windows {
     type CuDeviceGetAttribute = unsafe extern "system" fn(*mut c_int, c_int, CuDevice) -> CuResult;
     type CuCtxCreate = unsafe extern "system" fn(*mut CuContext, c_uint, CuDevice) -> CuResult;
     type CuCtxSetCurrent = unsafe extern "system" fn(CuContext) -> CuResult;
+    type CuCtxPopCurrent = unsafe extern "system" fn(*mut CuContext) -> CuResult;
     type CuCtxDestroy = unsafe extern "system" fn(CuContext) -> CuResult;
     type CuModuleLoadDataEx = unsafe extern "system" fn(
         *mut CuModule,
@@ -533,7 +534,7 @@ mod windows {
 
             let compile_result = (|| {
                 let options = [
-                    CString::new("--gpu-architecture=compute_89").unwrap(),
+                    CString::new(format!("--gpu-architecture={}", crate::CUDA_PTX_FALLBACK)).unwrap(),
                     CString::new("--std=c++14").unwrap(),
                     CString::new("--fmad=false").unwrap(),
                     CString::new("--ftz=false").unwrap(),
@@ -604,10 +605,23 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         }
 
         fn compile_packed_q8k(&self) -> Result<(Vec<u8>, i32, i32), CudaRuntimeError> {
-            self.compile_source(
-                include_str!("native/packed_q8k.cu"),
-                "bridge_packed_q8k_oracle_v1.cu",
-            )
+            use bridge_quant_layout::{layout, GgmlType, Q8_K_BLOCK_BYTES, Q8_QUANTS_OFFSET, Q8_BLOCK_SUMS_OFFSET};
+            let q4k_layout = layout(GgmlType::Q4_K).map_err(|e| CudaRuntimeError::Other(e.to_string()))?;
+            let q5k_layout = layout(GgmlType::Q5_K).map_err(|e| CudaRuntimeError::Other(e.to_string()))?;
+            let preamble = format!(
+                "#define Q8_K_BLOCK_BYTES {}\n\
+                 #define Q8_QUANTS_OFFSET {}\n\
+                 #define Q8_BLOCK_SUMS_OFFSET {}\n\
+                 #define Q4_K_BLOCK_BYTES {}\n\
+                 #define Q5_K_BLOCK_BYTES {}\n\n",
+                Q8_K_BLOCK_BYTES,
+                Q8_QUANTS_OFFSET,
+                Q8_BLOCK_SUMS_OFFSET,
+                q4k_layout.block_bytes,
+                q5k_layout.block_bytes
+            );
+            let source = format!("{}{}", preamble, include_str!("native/packed_q8k.cu"));
+            self.compile_source(&source, "bridge_packed_q8k_oracle_v1.cu")
         }
 
         fn program_log(&self, program: NvrtcProgram) -> Result<String, CudaRuntimeError> {
@@ -643,6 +657,7 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         device_get_attribute: CuDeviceGetAttribute,
         ctx_create: CuCtxCreate,
         ctx_set_current: CuCtxSetCurrent,
+        ctx_pop_current: CuCtxPopCurrent,
         ctx_destroy: CuCtxDestroy,
         module_load_data_ex: CuModuleLoadDataEx,
         module_get_function: CuModuleGetFunction,
@@ -676,6 +691,7 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
                         .symbol(b"cuDeviceGetAttribute\0", "cuDeviceGetAttribute")?,
                     ctx_create: library.symbol(b"cuCtxCreate_v2\0", "cuCtxCreate_v2")?,
                     ctx_set_current: library.symbol(b"cuCtxSetCurrent\0", "cuCtxSetCurrent")?,
+                    ctx_pop_current: library.symbol(b"cuCtxPopCurrent\0", "cuCtxPopCurrent")?,
                     ctx_destroy: library.symbol(b"cuCtxDestroy_v2\0", "cuCtxDestroy_v2")?,
                     module_load_data_ex: library.symbol(b"cuModuleLoadDataEx\0", "cuModuleLoadDataEx")?,
                     module_get_function: library.symbol(b"cuModuleGetFunction\0", "cuModuleGetFunction")?,
@@ -1498,7 +1514,20 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
                     cleanup_error.get_or_insert(error);
                 }
             }
-            match (upload_result, cleanup_error) {
+            let pop_result = upload_result.and_then(|()| {
+                let mut popped_context = ptr::null_mut();
+                self.driver
+                    .check("cuCtxPopCurrent(reusable packed executor)", unsafe {
+                        (self.driver.ctx_pop_current)(&mut popped_context)
+                    })?;
+                if popped_context != self.context {
+                    return Err(CudaRuntimeError::Other(
+                        "cuCtxPopCurrent returned a different context than created".to_owned(),
+                    ));
+                }
+                Ok(())
+            });
+            match (pop_result, cleanup_error) {
                 (Ok(()), Some(error)) => Err(error),
                 (result, _) => result,
             }
@@ -2091,19 +2120,25 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         }
     }
 
-    static PACKED_EXECUTOR: OnceLock<Result<Mutex<PackedExecutor>, String>> = OnceLock::new();
+    static PACKED_EXECUTOR: OnceLock<Mutex<Option<PackedExecutor>>> = OnceLock::new();
 
-    fn packed_executor() -> Result<&'static Mutex<PackedExecutor>, CudaRuntimeError> {
-        PACKED_EXECUTOR
-            .get_or_init(|| {
-                PackedExecutor::new()
-                    .map(Mutex::new)
-                    .map_err(|error| error.to_string())
-            })
-            .as_ref()
-            .map_err(|reason| CudaRuntimeError::PackedExecutorUnavailable {
-                reason: reason.clone(),
-            })
+    fn packed_executor() -> Result<&'static Mutex<Option<PackedExecutor>>, CudaRuntimeError> {
+        let mutex = PACKED_EXECUTOR.get_or_init(|| Mutex::new(None));
+        let mut guard = mutex.lock().map_err(|_| CudaRuntimeError::Other(
+            "packed executor mutex poisoned".to_owned()
+        ))?;
+        if guard.is_none() {
+            match PackedExecutor::new() {
+                Ok(executor) => *guard = Some(executor),
+                Err(error) => {
+                    return Err(CudaRuntimeError::PackedExecutorUnavailable {
+                        reason: error.to_string(),
+                    });
+                }
+            }
+        }
+        drop(guard);
+        Ok(mutex)
     }
 
     pub(super) fn execute_packed_q8k(
@@ -2130,9 +2165,12 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             reason: error.to_string(),
         })?;
 
-        let mut executor = packed_executor()?
+        let mut guard = packed_executor()?
             .lock()
             .map_err(|_| CudaRuntimeError::PackedExecutorPoisoned)?;
+        let executor = guard.as_mut().ok_or_else(|| CudaRuntimeError::Other(
+            "packed executor not initialized".to_owned()
+        ))?;
         executor.execute(weight_type, weights, q8, logical_elements, output)
     }
 
@@ -2171,9 +2209,12 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         .map_err(|error| CudaRuntimeError::PackedValidation {
             reason: error.to_string(),
         })?;
-        let mut executor = packed_executor()?
+        let mut guard = packed_executor()?
             .lock()
             .map_err(|_| CudaRuntimeError::PackedExecutorPoisoned)?;
+        let executor = guard.as_mut().ok_or_else(|| CudaRuntimeError::Other(
+            "packed executor not initialized".to_owned()
+        ))?;
         executor.execute_pair(
             weight_types,
             weights,
@@ -2222,9 +2263,12 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
                 reason: "packed batch output length must equal the sum of item rows",
             });
         }
-        let mut executor = packed_executor()?
+        let mut guard = packed_executor()?
             .lock()
             .map_err(|_| CudaRuntimeError::PackedExecutorPoisoned)?;
+        let executor = guard.as_mut().ok_or_else(|| CudaRuntimeError::Other(
+            "packed executor not initialized".to_owned()
+        ))?;
         executor.execute_batch(items, output)
     }
 
@@ -2383,11 +2427,8 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
     fn nvrtc_candidates() -> Vec<PathBuf> {
         let mut roots = Vec::new();
         for (name, value) in std::env::vars_os() {
-            if name
-                .to_string_lossy()
-                .to_ascii_uppercase()
-                .starts_with("CUDA_PATH")
-            {
+            let name_upper = name.to_string_lossy().to_ascii_uppercase();
+            if name_upper == "CUDA_PATH" || name_upper.starts_with("CUDA_PATH_V") {
                 roots.push(PathBuf::from(value));
             }
         }
@@ -2425,6 +2466,19 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         candidates.sort();
         candidates.reverse();
         candidates.dedup();
+
+        let program_files = std::env::var_os("ProgramFiles")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+        candidates.retain(|path| {
+            if let Ok(canonical) = path.canonicalize() {
+                canonical.starts_with(&program_files)
+                    || canonical.starts_with(r"C:\Program Files")
+                    || canonical.starts_with(r"C:\Program Files (x86)")
+            } else {
+                false
+            }
+        });
         candidates
     }
 }

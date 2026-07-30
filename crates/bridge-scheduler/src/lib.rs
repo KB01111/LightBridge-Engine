@@ -49,7 +49,15 @@ impl HardwareFingerprintV1 {
 
     pub fn digest(&self) -> Result<String, ProfileError> {
         self.validate()?;
-        let encoded = serde_json::to_vec(self).map_err(ProfileError::Json)?;
+        let mut canonical = self.clone();
+        canonical.devices.sort_by(|a, b| {
+            a.backend
+                .cmp(&b.backend)
+                .then_with(|| a.name.cmp(&b.name))
+                .then_with(|| a.device_uuid.cmp(&b.device_uuid))
+        });
+        canonical.pcie_links.sort();
+        let encoded = serde_json::to_vec(&canonical).map_err(ProfileError::Json)?;
         Ok(format!("{:x}", Sha256::digest(encoded)))
     }
 }
@@ -242,7 +250,7 @@ impl BackendDecision {
         let correctness_passes = correctness.passes();
         let automatic = authoritative
             && correctness_passes
-            && improvement_bps.is_some_and(|value| value >= minimum_improvement_bps);
+            && improvement_bps.is_some_and(|value| value > 0 && value >= minimum_improvement_bps);
         let reason = if !authoritative {
             "backend is advisory-only".to_owned()
         } else if !correctness_passes {

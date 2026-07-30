@@ -264,7 +264,7 @@ pub fn moe_routed_by_id_into(
     require_equal("MoE output", shared.output_width(), output.len())?;
     if candidate_output_scratch.len() < output.len() {
         return Err(KernelError::ScratchTooSmall {
-            field: "MoE preflight output",
+            field: "candidate_output_scratch",
             required: output.len(),
             actual: candidate_output_scratch.len(),
         });
@@ -334,7 +334,7 @@ fn validate_structure(
     require_equal("MoE output", shared.output_width(), output.len())?;
     if candidate_output_scratch.len() < output.len() {
         return Err(KernelError::ScratchTooSmall {
-            field: "MoE preflight output",
+            field: "candidate_output_scratch",
             required: output.len(),
             actual: candidate_output_scratch.len(),
         });
@@ -361,6 +361,11 @@ fn validate_structure(
             "routed expert input width",
             shared.input_width(),
             selected.expert.input_width(),
+        )?;
+        require_equal(
+            "routed expert hidden width",
+            shared.hidden_width(),
+            selected.expert.hidden_width(),
         )?;
         require_equal(
             "routed expert output width",

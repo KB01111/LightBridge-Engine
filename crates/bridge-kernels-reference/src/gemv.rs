@@ -113,11 +113,22 @@ pub fn gemv_cuda_q8k_into(
     input: &[f32],
     output: &mut [f32],
     q8_scratch: &mut [u8],
+    candidate_scratch: &mut [f32],
 ) -> Result<()> {
     let q8 = prepare_llama_q8k(matrix, input, output, q8_scratch)?;
-    bridge_kernels_cuda::packed_q8k_gemv_into(matrix.ty(), matrix.bytes(), q8, matrix.input_width(), output)
+    if candidate_scratch.len() < output.len() {
+        return Err(KernelError::ScratchTooSmall {
+            field: "CUDA GEMV candidate scratch",
+            required: output.len(),
+            actual: candidate_scratch.len(),
+        });
+    }
+    let scratch = &mut candidate_scratch[..output.len()];
+    bridge_kernels_cuda::packed_q8k_gemv_into(matrix.ty(), matrix.bytes(), q8, matrix.input_width(), scratch)
         .map_err(cuda_error)?;
-    validate_finite_slice("CUDA GEMV output", output)
+    validate_finite_slice("CUDA GEMV output", scratch)?;
+    output.copy_from_slice(scratch);
+    Ok(())
 }
 
 fn gemv_cpu_parallel_f32_into(
@@ -171,7 +182,9 @@ pub fn gemv_into(
         ReferenceExecutionMode::CpuParallelAvx512Vnni => {
             gemv_cpu_parallel_avx512_vnni_into(matrix, input, output, q8_scratch)
         }
-        ReferenceExecutionMode::CudaQ8K => gemv_cuda_q8k_into(matrix, input, output, q8_scratch),
+        ReferenceExecutionMode::CudaQ8K => {
+            gemv_cuda_q8k_into(matrix, input, output, q8_scratch, decoded_block_scratch)
+        }
     }
 }
 
@@ -300,6 +313,8 @@ pub fn gemv_pair_into(
         && first.ty() != GgmlType::F32
         && second.ty() != GgmlType::F32;
     if !packed_pair {
+        validate_dimensions(first, input, first_output)?;
+        validate_dimensions(second, input, second_output)?;
         gemv_into(
             mode,
             first,
@@ -596,25 +611,9 @@ fn compute_prepared_q8k_into(
                 *destination = prepared.dot_row(row)?;
             }
         }
-        ReferenceExecutionMode::CpuParallelQ8K => {
-            output
-                .par_iter_mut()
-                .enumerate()
-                .try_for_each(|(row, destination)| {
-                    *destination = prepared.dot_row(row)?;
-                    Ok::<(), KernelError>(())
-                })?;
-        }
-        ReferenceExecutionMode::CpuParallelAvxVnni => {
-            output
-                .par_iter_mut()
-                .enumerate()
-                .try_for_each(|(row, destination)| {
-                    *destination = prepared.dot_row(row)?;
-                    Ok::<(), KernelError>(())
-                })?;
-        }
-        ReferenceExecutionMode::CpuParallelAvx512Vnni => {
+        ReferenceExecutionMode::CpuParallelQ8K
+        | ReferenceExecutionMode::CpuParallelAvxVnni
+        | ReferenceExecutionMode::CpuParallelAvx512Vnni => {
             output
                 .par_iter_mut()
                 .enumerate()

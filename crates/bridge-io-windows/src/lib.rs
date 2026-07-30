@@ -102,13 +102,23 @@ impl ReadSlotPool {
         available
             .try_reserve_exact(slot_count.min(64))
             .map_err(|_| SlotPoolError::AllocationFailed)?;
+        let mut generations = Vec::new();
+        generations
+            .try_reserve_exact(slot_count)
+            .map_err(|_| SlotPoolError::AllocationFailed)?;
+        generations.resize(slot_count, 0);
+        let mut leased = Vec::new();
+        leased
+            .try_reserve_exact(slot_count)
+            .map_err(|_| SlotPoolError::AllocationFailed)?;
+        leased.resize(slot_count, false);
         Ok(Self {
             inner: Arc::new(ReadSlotPoolInner {
                 state: Mutex::new(ReadSlotPoolState {
                     available,
                     allocated: 0,
-                    generations: vec![0; slot_count],
-                    leased: vec![false; slot_count],
+                    generations,
+                    leased,
                 }),
                 changed: Condvar::new(),
                 slot_bytes,
@@ -498,12 +508,12 @@ impl OverlappedFile {
                             source: std::io::Error::from_raw_os_error(error as i32),
                         });
                     }
-                    continue;
+                    break;
                 }
                 if first_error.is_none() {
                     first_error = Some(ReadError::UnknownCompletion);
                 }
-                continue;
+                break;
             }
             let Some(operation) = pending
                 .iter_mut()
@@ -512,13 +522,13 @@ impl OverlappedFile {
                 if first_error.is_none() {
                     first_error = Some(ReadError::UnknownCompletion);
                 }
-                continue;
+                break;
             };
             if operation.completed {
                 if first_error.is_none() {
                     first_error = Some(ReadError::DuplicateCompletion);
                 }
-                continue;
+                break;
             }
             operation.completed = true;
             completed += 1;
@@ -529,13 +539,24 @@ impl OverlappedFile {
                     source: std::io::Error::last_os_error(),
                 });
             } else if bytes as usize != operation.expected && first_error.is_none() {
-                first_error = Some(ReadError::UnexpectedEof {
-                    path: self.path.clone(),
-                    offset: operation.offset,
-                    expected: operation.expected,
-                    actual: bytes as usize,
-                });
+                let actual_bytes = bytes as usize;
+                let actual_end = operation.offset.saturating_add(actual_bytes as u64);
+                let expected_end = operation.offset.saturating_add(operation.expected as u64);
+                let is_final_partial = actual_bytes < operation.expected
+                    && actual_end <= self.length
+                    && expected_end > self.length;
+                if !is_final_partial {
+                    first_error = Some(ReadError::UnexpectedEof {
+                        path: self.path.clone(),
+                        offset: operation.offset,
+                        expected: operation.expected,
+                        actual: actual_bytes,
+                    });
+                }
             }
+        }
+        if first_error.is_some() && completed < submitted {
+            cancel_and_drain(handle, self.completion_port, pending);
         }
         if cancellation_sent {
             return Err(ReadError::Cancelled);
@@ -552,15 +573,20 @@ impl OverlappedFile {
             .offset
             .checked_add(length)
             .ok_or(ReadError::ArithmeticOverflow)?;
-        if end > self.length {
-            return Err(ReadError::RangeOutOfBounds {
-                start: request.offset,
-                end,
-                file_length: self.length,
-            });
-        }
         if self.buffering == FileBuffering::Unbuffered {
-            if request.offset % self.alignment as u64 != 0 {
+            let alignment_u64 = self.alignment as u64;
+            let padded_length = self.length.checked_add(alignment_u64 - 1)
+                .and_then(|value| value.checked_div(alignment_u64))
+                .and_then(|blocks| blocks.checked_mul(alignment_u64))
+                .ok_or(ReadError::ArithmeticOverflow)?;
+            if end > padded_length {
+                return Err(ReadError::RangeOutOfBounds {
+                    start: request.offset,
+                    end,
+                    file_length: self.length,
+                });
+            }
+            if request.offset % alignment_u64 != 0 {
                 return Err(ReadError::UnbufferedOffsetAlignment {
                     offset: request.offset,
                     alignment: self.alignment,
@@ -576,6 +602,14 @@ impl OverlappedFile {
                 return Err(ReadError::UnbufferedBufferAlignment {
                     address: request.buffer.as_ptr() as usize,
                     alignment: self.alignment,
+                });
+            }
+        } else {
+            if end > self.length {
+                return Err(ReadError::RangeOutOfBounds {
+                    start: request.offset,
+                    end,
+                    file_length: self.length,
                 });
             }
         }
@@ -660,10 +694,17 @@ fn file_alignment(file: &File, require_physical_sector: bool) -> Result<usize, R
             information.AlignmentRequirement,
         ))?;
 
+    if !require_physical_sector {
+        return Ok(device_alignment);
+    }
+
     // `FILE_FLAG_NO_BUFFERING` also requires transfer sizes and addresses to
     // satisfy the volume's physical-sector contract. FILE_STORAGE_INFO is the
     // handle-local query for both logical and physical sector sizes.
+    // SAFETY: an all-zero FILE_STORAGE_INFO is valid for this query.
     let mut storage = unsafe { std::mem::zeroed::<FILE_STORAGE_INFO>() };
+    // SAFETY: the handle is live and the output buffer exactly matches the
+    // requested information class.
     let storage_status = unsafe {
         GetFileInformationByHandleEx(
             file.as_raw_handle().cast(),
@@ -673,12 +714,9 @@ fn file_alignment(file: &File, require_physical_sector: bool) -> Result<usize, R
         )
     };
     if storage_status == 0 {
-        if require_physical_sector {
-            return Err(ReadError::PhysicalSectorQuery {
-                source: std::io::Error::last_os_error(),
-            });
-        }
-        return Ok(device_alignment);
+        return Err(ReadError::PhysicalSectorQuery {
+            source: std::io::Error::last_os_error(),
+        });
     }
 
     [

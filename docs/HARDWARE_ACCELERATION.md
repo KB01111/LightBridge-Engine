@@ -98,11 +98,11 @@ not marked automatic.
 Follow-up full-token qualification disproved two attractive micro-optimizations:
 
 - One CPU microbenchmark selected 12 workers pinned one per physical core,
-  while the final regenerated profile selected one unbound worker. The
+  while the final regenerated profile selected 12 unbound workers. The
   authenticated 12-pinned full run took 180,540 ms versus 160,733 ms for 24
   unbound workers on the same code path. That instability is why the profile
   records micro winners as rejected candidates and retains the accepted
-  12-unbound policy until a full-token corpus qualifies a replacement.
+  24-unbound policy until a full-token corpus qualifies a replacement.
 - Chunk-8 grouped prefill preserved `[16883, 0]` and `Hello!`, reduced expert
   loads from 11,376 to 6,777 (40.4%), and reduced prefill from 142,493 ms to
   136,733 ms. Total time improved only from 160,733 ms to 158,277 ms (1.5%),

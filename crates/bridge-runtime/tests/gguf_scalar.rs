@@ -309,7 +309,8 @@ fn explicit_cuda_full_route_is_bit_exact_deterministic_and_can_continue_on_cpu()
 
     assert!(cuda.fall_back_to_cpu());
     assert!(cuda.cuda_fallback_active());
-    assert_eq!(cuda.backend_name(), "cpu_parallel_avx2_q8_k");
+    let expected_backend = CpuCapabilities::detect().execution_mode().backend_name();
+    assert_eq!(cuda.backend_name(), expected_backend);
     scalar
         .evaluate_token(&mut scalar_session, 7, &mut scalar_logits)
         .unwrap();
@@ -635,7 +636,8 @@ fn cuda_failure_rewinds_all_kv_switches_to_cpu_and_reports_failed_retry() {
         .unwrap_err();
     assert!(matches!(error, Hy3ScalarError::CudaFallbackFailed { .. }));
     assert!(model.cuda_fallback_active());
-    assert_eq!(model.backend_name(), "cpu_parallel_avx2_q8_k");
+    let expected_backend = CpuCapabilities::detect().execution_mode().backend_name();
+    assert_eq!(model.backend_name(), expected_backend);
     assert_eq!(model.position(&session), 0);
     for layer in 0..model.config().block_count as usize {
         assert_eq!(session.kv_stored_tokens(layer).unwrap(), 0);

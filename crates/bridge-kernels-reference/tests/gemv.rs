@@ -468,6 +468,9 @@ fn packed_matrix_validation_is_atomic_when_a_later_row_is_malformed() {
         )
         .unwrap_err();
         if mode == ReferenceExecutionMode::CudaQ8K {
+            // CUDA pre-launch validation rejects non-finite scales before kernel execution.
+            // Post-launch non-finite kernel output is validated via candidate scratch buffer
+            // before copying to caller-visible output, preserving atomicity.
             assert!(matches!(error, KernelError::Cuda { .. }));
         } else {
             assert!(matches!(

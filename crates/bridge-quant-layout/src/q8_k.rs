@@ -993,37 +993,27 @@ unsafe fn lane_sums_i8_32(weights: &[i8], activations: &[u8]) -> [i32; 8] {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn dot_i8_avx_vnni_16(weights: &[i8], activations: &[u8]) -> i32 {
-    use std::arch::asm;
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::{__m128i, _mm_dpbusd_avx_epi32, _mm_loadu_si128, _mm_setzero_si128, _mm_storeu_si128, _mm_xor_si128};
 
     debug_assert!(weights.len() >= 16);
     debug_assert!(activations.len() >= 16);
     let rebase = [0x80_u8; 16];
-    let mut lanes = [0_i32; 4];
     // `VPDPBUSD` consumes unsigned activation bytes and signed weight bytes.
     // XOR with 0x80 maps each signed activation byte to `value + 128`;
     // subtracting 128 times the weight sum restores the exact signed dot.
     //
     // SAFETY: runtime dispatch proved AVX-VNNI support and every pointer
     // references a complete unaligned 16-byte region.
+    let mut lanes = [0_i32; 4];
     unsafe {
-        asm!(
-            "vmovdqu xmm0, [{weights}]",
-            "vmovdqu xmm1, [{activations}]",
-            "vmovdqu xmm2, [{rebase}]",
-            "vpxor xmm1, xmm1, xmm2",
-            "vpxor xmm3, xmm3, xmm3",
-            "vpdpbusd xmm3, xmm1, xmm0",
-            "vmovdqu [{lanes}], xmm3",
-            weights = in(reg) weights.as_ptr(),
-            activations = in(reg) activations.as_ptr(),
-            rebase = in(reg) rebase.as_ptr(),
-            lanes = in(reg) lanes.as_mut_ptr(),
-            lateout("xmm0") _,
-            lateout("xmm1") _,
-            lateout("xmm2") _,
-            lateout("xmm3") _,
-            options(nostack, preserves_flags),
-        );
+        let weights_vec = _mm_loadu_si128(weights.as_ptr() as *const __m128i);
+        let activations_vec = _mm_loadu_si128(activations.as_ptr() as *const __m128i);
+        let rebase_vec = _mm_loadu_si128(rebase.as_ptr() as *const __m128i);
+        let rebased = _mm_xor_si128(activations_vec, rebase_vec);
+        let zero = _mm_setzero_si128();
+        let result = _mm_dpbusd_avx_epi32(zero, rebased, weights_vec);
+        _mm_storeu_si128(lanes.as_mut_ptr() as *mut __m128i, result);
     }
     let shifted_sum = lanes.into_iter().sum::<i32>();
     let weight_sum = weights[..16].iter().map(|&weight| i32::from(weight)).sum::<i32>();
@@ -1033,7 +1023,8 @@ unsafe fn dot_i8_avx_vnni_16(weights: &[i8], activations: &[u8]) -> i32 {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn dot_i8_avx_vnni_32(weights: &[i8], activations: &[u8]) -> i32 {
-    use std::arch::asm;
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::{__m256i, _mm256_dpbusd_avx_epi32, _mm256_loadu_si256, _mm256_setzero_si256, _mm256_storeu_si256, _mm256_xor_si256};
 
     debug_assert!(weights.len() >= 32);
     debug_assert!(activations.len() >= 32);
@@ -1042,24 +1033,13 @@ unsafe fn dot_i8_avx_vnni_32(weights: &[i8], activations: &[u8]) -> i32 {
     // SAFETY: runtime dispatch proved AVX-VNNI support and every pointer
     // references a complete unaligned 32-byte region.
     unsafe {
-        asm!(
-            "vmovdqu ymm0, [{weights}]",
-            "vmovdqu ymm1, [{activations}]",
-            "vmovdqu ymm2, [{rebase}]",
-            "vpxor ymm1, ymm1, ymm2",
-            "vpxor ymm3, ymm3, ymm3",
-            "vpdpbusd ymm3, ymm1, ymm0",
-            "vmovdqu [{lanes}], ymm3",
-            weights = in(reg) weights.as_ptr(),
-            activations = in(reg) activations.as_ptr(),
-            rebase = in(reg) rebase.as_ptr(),
-            lanes = in(reg) lanes.as_mut_ptr(),
-            lateout("ymm0") _,
-            lateout("ymm1") _,
-            lateout("ymm2") _,
-            lateout("ymm3") _,
-            options(nostack, preserves_flags),
-        );
+        let weights_vec = _mm256_loadu_si256(weights.as_ptr() as *const __m256i);
+        let activations_vec = _mm256_loadu_si256(activations.as_ptr() as *const __m256i);
+        let rebase_vec = _mm256_loadu_si256(rebase.as_ptr() as *const __m256i);
+        let rebased = _mm256_xor_si256(activations_vec, rebase_vec);
+        let zero = _mm256_setzero_si256();
+        let result = _mm256_dpbusd_avx_epi32(zero, rebased, weights_vec);
+        _mm256_storeu_si256(lanes.as_mut_ptr() as *mut __m256i, result);
     }
     let shifted_sum = lanes.into_iter().sum::<i32>();
     let weight_sum = weights[..32].iter().map(|&weight| i32::from(weight)).sum::<i32>();
