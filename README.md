@@ -11,6 +11,11 @@ from disk under bounded RAM.
 > server are implemented. On 2026-07-29 the exact authenticated 96 GB payload
 > completed direct and sidecar generation, matched pinned llama.cpp greedy
 > tokens, and passed the bounded cold/admission/warm benchmark workflow.
+> Hardware-tuned CPU/I/O candidates are now implemented behind explicit
+> correctness and performance gates. A live 24-worker candidate preserved the
+> accepted `[16883, 0]` / `Hello!` output and reduced the direct two-token run
+> from 202,981 ms to about 154,000 ms, but no unqualified accelerator is
+> advertised.
 
 The current non-MTP baseline is
 [`satgeze/Hy3-1M-GGUF/hy3-1M-IQ2_M.gguf`](https://huggingface.co/satgeze/Hy3-1M-GGUF/blob/main/hy3-1M-IQ2_M.gguf).
@@ -33,12 +38,30 @@ Model weights are not distributed in this repository.
 - Authenticated selected-payload loading with early sparse-file refusal,
   conservative memory admission, direct expert reads, lossless expert-major
   sidecars, parallel route prefetch, and bounded deduplicating caches.
-- Runtime-selected AVX2 integer dot kernels with bounded CPU row parallelism;
-  scalar modes remain available for differential diagnosis.
+- Runtime-selected AVX2 integer dot kernels with bounded CPU row parallelism,
+  plus opt-in bit-exact Zen 5 AVX-VNNI and AVX-512/VNNI paths; scalar modes
+  remain available for differential diagnosis. The persistent worker pool
+  supports tuner-selected logical-CPU placement through `--cpu-set-ids`.
+- Single-pass transactional MoE execution, shared gate/up activation
+  quantization, final-prompt-position-only output-head projection, and reused
+  session routing/scratch records.
+- Opt-in layer-major grouped prefill (`--prefill-chunk 2|4|8`) with per-layer
+  route unions, plus greedy lossless T=2 n-gram verification
+  (`--speculative-ngram-t 2`); token-serial decode remains the default.
+- Lazy 4 KiB-aligned, generation-stamped expert read slots that direct GGUF
+  and sidecar spans fill in place; cache eviction poisons and recycles them.
+- Buffered and unbuffered overlapped IOCP read candidates with queried
+  physical-sector alignment.
+- An explicit link-free `--backend cuda-q8-k` streaming model path for
+  Windows. It runtime-compiles strict-FP32 packed Q4_K, Q5_K, IQ2_S, and
+  IQ3_S GEMV, batches Q/K/V and MoE projections through two reusable pinned
+  host/device arenas, preserves the 1.25 GiB VRAM reserve, and transactionally
+  retries the exact AVX2 path after a CUDA failure. It is opt-in while the
+  multi-prompt qualification corpus remains open.
 - Model-bound, checksummed, size-bounded persistent chat/KV sessions and
   atomically persisted expert-cache heat.
 - Product commands for inspect, doctor, plan, validate, prepare, tokenize,
-  detokenize, chat, serve, bench, and cache management.
+  detokenize, chat, serve, tune, bench/trace, and cache management.
 - A bounded OpenAI-compatible Chat Completions server with JSON/SSE responses,
   structured reasoning/tool calls, stop strings, usage chunks, concurrency
   limits, and request-body limits.
@@ -73,11 +96,12 @@ cargo fmt --all -- --check
 cargo test -p bridge-quant-layout --release --all-targets
 ```
 
-At the 2026-07-29 checkpoint, the workspace suite contains **287 passing tests
-across 59 suites**. This includes malformed-input boundaries, pinned
-quantization and reduced-logit oracles, scalar/AVX2 parity, direct/sidecar
-equality, cache and session persistence, transactional failure rollback, and
-real reduced-model HTTP routes.
+At the 2026-07-30 checkpoint, the workspace suite contains **326 passing tests
+across 63 suites**. This includes malformed-input boundaries, pinned
+quantization and reduced-logit oracles, scalar/AVX2/AVX-VNNI/AVX-512 parity,
+direct/sidecar equality, CUDA batch atomicity and CPU fallback/KV rewind,
+cache and session persistence, transactional failure rollback, and real
+reduced-model HTTP routes.
 
 ## Use the engine
 
@@ -93,6 +117,33 @@ Check the host and build a deterministic memory/storage plan:
 cargo run -p bridge-cli -- doctor
 cargo run -p bridge-cli -- plan --model C:\path\to\hy3-1M-IQ2_M.gguf --json
 ```
+
+Create a drift-sensitive hardware profile, then benchmark an explicitly
+selected candidate with a Chrome/Perfetto trace:
+
+```powershell
+cargo run -p bridge-cli -- tune `
+  --model D:\LightBridge\Models\hy3-1M-IQ2_M.gguf `
+  --output D:\LightBridge\Profiles\hx370-performance.json
+
+cargo run -p bridge-cli -- bench `
+  --model D:\LightBridge\Models\hy3-1M-IQ2_M.gguf `
+  --backend cuda-q8-k `
+  --cpu-threads 12 `
+  --prefill-chunk 8 `
+  --prompt-corpus tools\hardware\hx370-qualification-corpus.json `
+  --corpus-repeats 2 `
+  --hardware-profile D:\LightBridge\Profiles\hx370-performance.json `
+  --trace D:\LightBridge\Profiles\hx370-cuda-corpus-trace.json
+```
+
+The tuner records CPU, affinity, storage, and backend candidates but does not
+copy microbenchmark-only winners into the executable policy or auto-enable a
+path without full route/token/logit correctness and at least a 10% median
+complete-token gain. Profiles generated by an older executable are rejected;
+rerun `tune` after changing the runtime or CUDA kernels.
+See [hardware-tuned acceleration](docs/HARDWARE_ACCELERATION.md) for the
+implemented boundary and remaining CUDA/Vulkan/NPU gates.
 
 Authenticate the complete payload, then chat with the default bounded AVX2
 CPU backend:
@@ -137,28 +188,45 @@ cargo run -p bridge-cli -- serve `
 - `bridge-gguf-split`: strict shard discovery and global tensor directories.
 - `bridge-model-hy3`: Hy3 metadata and complete tensor-schema validation.
 - `bridge-quant-layout`: exact packed decoders, Q8_K activation quantization,
-  and scalar/AVX2 dot products.
+  validated packed matrices, and scalar/AVX2/AVX-VNNI/AVX-512 VNNI dot
+  products.
 - `bridge-kernels-reference`: complete allocation-explicit Hy3 reference
   kernels.
 - `bridge-kernels-cpu`: bounded CPU pool, ISA detection, and runtime dispatch.
 - `bridge-kv-gqa`: lazy paged grouped-query KV plus persistent snapshots.
 - `bridge-tokenizer`: embedded tokenizer, chat templates, incremental decode,
   reasoning, and tool-call protocol.
-- `bridge-io-windows`: cancellable bounded positioned reads and physical sparse
-  storage inspection.
+- `bridge-io-windows`: cancellable positioned reads, aligned slot leases,
+  buffered/unbuffered IOCP batches, and physical storage inspection.
 - `bridge-format`, `bridge-prepare`, and `bridge-cache`: bound expert sidecars,
   preparation, and compressed expert caching.
 - `bridge-runtime`: authenticated model/session lifecycle and generation.
+- `bridge-scheduler`: versioned fingerprints, tuning policies, backend
+  decisions, and Chrome/Perfetto trace records.
+- `bridge-kernels-cuda`: link-free CUDA ABI, NVRTC/Driver canary, bit-exact
+  packed GEMV oracle, and reusable double-staged batch executor used by the
+  explicit streaming model backend.
 - `bridge-server`: bounded OpenAI-compatible HTTP/SSE service.
 - `bridge-cli`: all user-facing commands and deterministic reports.
 - `bridge-test-model`: deterministic reduced Hy3 model and GGUF fixtures.
 
 ## Explicit capability gates
 
-- CUDA is disabled when no live NVIDIA device is available; CPU execution is
-  fully functional and is the selected machine's production path.
-- Grouped multi-token prefill and experimental iGPU placement are reported
-  unavailable rather than silently falling back under an accelerated label.
+- CUDA is compiled on Windows and available explicitly as
+  `--backend cuda-q8-k`, but is not authoritative or automatic. Reduced-model
+  exactness, deterministic repeats, transactional CPU fallback, and one
+  authenticated full-model prompt pass; the multi-prompt corpus, resident
+  spine, asynchronous expert overlap, and default-enable gate remain open.
+- AVX-VNNI and AVX-512/VNNI are opt-in after packed-dot and reduced-route
+  parity; neither beat AVX2 in the live mixed-format probe or became
+  automatic.
+- Grouped multi-token prefill and T=2 n-gram verification are opt-in after
+  reduced exactness tests. Chunk 8 improved the CPU-only run by only 1.5%,
+  but the explicit CUDA candidate used it to reduce a matching full-model
+  single-prompt run from about 160.7 seconds to 115.5 seconds. That is not a
+  corpus qualification or evidence for automatic selection.
+- Experimental iGPU placement remains unavailable rather than silently
+  falling back under an accelerated label.
 - MTP is not applicable because the selected checkpoint has no MTP block.
 - Full-model inference acceptance passed with the exact pinned length and
   SHA-256. The separate sparse header mirror remains metadata-only and is
@@ -167,6 +235,7 @@ cargo run -p bridge-cli -- serve `
 ## Documentation
 
 - [Current implementation status and roadmap](docs/STATUS.md)
+- [Hardware-tuned acceleration and qualification boundary](docs/HARDWARE_ACCELERATION.md)
 - [Hy3 engine architecture](docs/superpowers/specs/2026-07-27-hy3-engine-architecture-design.md)
 - [Authoritative ingestion design](docs/superpowers/specs/2026-07-27-hy3-ingestion-design.md)
 - [Reference-math implementation plan](docs/superpowers/plans/2026-07-28-hy3-reference-math.md)

@@ -1,5 +1,12 @@
 //! Bounded host-CPU execution for the exact Q8_K kernel path.
 
+use std::collections::BTreeSet;
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
+};
+
+use bridge_core::sys::pin_current_thread;
 use bridge_kernels_reference::ReferenceExecutionMode;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
@@ -19,7 +26,10 @@ impl Default for CpuBackendConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CpuCapabilities {
     pub avx2: bool,
+    pub avx_vnni: bool,
     pub avx512f: bool,
+    pub avx512bw: bool,
+    pub avx512vl: bool,
     pub avx512_vnni: bool,
 }
 
@@ -27,9 +37,14 @@ impl CpuCapabilities {
     pub fn detect() -> Self {
         #[cfg(target_arch = "x86_64")]
         {
+            let avx2 = std::is_x86_feature_detected!("avx2");
+            let extended = std::arch::x86_64::__cpuid_count(7, 1);
             Self {
-                avx2: std::is_x86_feature_detected!("avx2"),
+                avx2,
+                avx_vnni: avx2 && extended.eax & (1 << 4) != 0,
                 avx512f: std::is_x86_feature_detected!("avx512f"),
+                avx512bw: std::is_x86_feature_detected!("avx512bw"),
+                avx512vl: std::is_x86_feature_detected!("avx512vl"),
                 avx512_vnni: std::is_x86_feature_detected!("avx512vnni"),
             }
         }
@@ -37,7 +52,10 @@ impl CpuCapabilities {
         {
             Self {
                 avx2: false,
+                avx_vnni: false,
                 avx512f: false,
+                avx512bw: false,
+                avx512vl: false,
                 avx512_vnni: false,
             }
         }
@@ -45,6 +63,19 @@ impl CpuCapabilities {
 
     pub const fn avx2_dot_kernel_available(self) -> bool {
         cfg!(target_arch = "x86_64") && self.avx2
+    }
+
+    pub const fn avx_vnni_dot_kernel_available(self) -> bool {
+        cfg!(target_arch = "x86_64") && self.avx2 && self.avx_vnni
+    }
+
+    pub const fn avx512_dot_kernel_available(self) -> bool {
+        cfg!(target_arch = "x86_64")
+            && self.avx2
+            && self.avx512f
+            && self.avx512bw
+            && self.avx512vl
+            && self.avx512_vnni
     }
 
     pub const fn backend_name(self) -> &'static str {
@@ -59,6 +90,7 @@ impl CpuCapabilities {
 pub struct CpuBackend {
     config: CpuBackendConfig,
     capabilities: CpuCapabilities,
+    cpu_set_ids: Vec<u32>,
     pool: ThreadPool,
 }
 
@@ -68,23 +100,64 @@ impl std::fmt::Debug for CpuBackend {
             .debug_struct("CpuBackend")
             .field("config", &self.config)
             .field("capabilities", &self.capabilities)
+            .field("cpu_set_ids", &self.cpu_set_ids)
             .finish_non_exhaustive()
     }
 }
 
 impl CpuBackend {
     pub fn new(config: CpuBackendConfig) -> Result<Self, CpuBackendError> {
+        Self::new_with_cpu_set(config, &[])
+    }
+
+    pub fn new_with_cpu_set(config: CpuBackendConfig, cpu_set_ids: &[u32]) -> Result<Self, CpuBackendError> {
         if config.threads == 0 {
             return Err(CpuBackendError::ZeroThreads);
         }
-        let pool = ThreadPoolBuilder::new()
+        if !cpu_set_ids.is_empty() && cpu_set_ids.len() != config.threads {
+            return Err(CpuBackendError::CpuSetCount {
+                threads: config.threads,
+                cpu_set_ids: cpu_set_ids.len(),
+            });
+        }
+        if cpu_set_ids.iter().copied().collect::<BTreeSet<_>>().len() != cpu_set_ids.len() {
+            return Err(CpuBackendError::DuplicateCpuSet);
+        }
+
+        let mut builder = ThreadPoolBuilder::new()
             .num_threads(config.threads)
-            .thread_name(|index| format!("lightbridge-cpu-{index}"))
+            .thread_name(|index| format!("lightbridge-cpu-{index}"));
+        let affinity_failed = Arc::new(AtomicBool::new(false));
+        let started_count = Arc::new(AtomicUsize::new(0));
+        if !cpu_set_ids.is_empty() {
+            let selected = Arc::new(cpu_set_ids.to_vec());
+            let failed = Arc::clone(&affinity_failed);
+            let started = Arc::clone(&started_count);
+            builder = builder.start_handler(move |index| {
+                if pin_current_thread(selected[index]).is_none() {
+                    failed.store(true, Ordering::Release);
+                }
+                started.fetch_add(1, Ordering::Release);
+            });
+        } else {
+            let started = Arc::clone(&started_count);
+            builder = builder.start_handler(move |_index| {
+                started.fetch_add(1, Ordering::Release);
+            });
+        }
+        let pool = builder
             .build()
             .map_err(|error| CpuBackendError::Build(error.to_string()))?;
+        while started_count.load(Ordering::Acquire) < config.threads {
+            std::hint::spin_loop();
+        }
+        if affinity_failed.load(Ordering::Acquire) {
+            return Err(CpuBackendError::Affinity);
+        }
         Ok(Self {
             config,
             capabilities: CpuCapabilities::detect(),
+            cpu_set_ids: cpu_set_ids.to_vec(),
             pool,
         })
     }
@@ -95,6 +168,10 @@ impl CpuBackend {
 
     pub const fn capabilities(&self) -> CpuCapabilities {
         self.capabilities
+    }
+
+    pub fn cpu_set_ids(&self) -> &[u32] {
+        &self.cpu_set_ids
     }
 
     pub const fn execution_mode(&self) -> ReferenceExecutionMode {
@@ -129,6 +206,14 @@ pub fn recommended_thread_count() -> usize {
 pub enum CpuBackendError {
     #[error("CPU backend thread count must be greater than zero")]
     ZeroThreads,
+    #[error(
+        "CPU affinity requires exactly one logical CPU ID per worker; got {cpu_set_ids} IDs for {threads} workers"
+    )]
+    CpuSetCount { threads: usize, cpu_set_ids: usize },
+    #[error("CPU affinity IDs must be unique")]
+    DuplicateCpuSet,
+    #[error("OS rejected at least one persistent worker affinity assignment")]
+    Affinity,
     #[error("failed to build bounded CPU thread pool: {0}")]
     Build(String),
 }
@@ -174,6 +259,26 @@ mod tests {
             CpuBackend::new(CpuBackendConfig { threads: 0 }).unwrap_err(),
             CpuBackendError::ZeroThreads
         );
+        assert_eq!(
+            CpuBackend::new_with_cpu_set(CpuBackendConfig { threads: 2 }, &[0]).unwrap_err(),
+            CpuBackendError::CpuSetCount {
+                threads: 2,
+                cpu_set_ids: 1
+            }
+        );
+        assert_eq!(
+            CpuBackend::new_with_cpu_set(CpuBackendConfig { threads: 2 }, &[0, 0]).unwrap_err(),
+            CpuBackendError::DuplicateCpuSet
+        );
         assert!(recommended_thread_count() > 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn persistent_worker_accepts_a_detected_windows_cpu_assignment() {
+        let selected = bridge_core::sys::CpuTopology::detect().one_thread_per_core();
+        let backend = CpuBackend::new_with_cpu_set(CpuBackendConfig { threads: 1 }, &selected[..1]).unwrap();
+        backend.install(|| assert!(std::thread::current().name().is_some()));
+        assert_eq!(backend.cpu_set_ids(), &selected[..1]);
     }
 }

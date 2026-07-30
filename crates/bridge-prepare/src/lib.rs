@@ -147,6 +147,36 @@ impl DirectExpertStore {
         })
     }
 
+    /// Reads the source slabs directly into a tight gate/up/down destination.
+    pub fn read_expert_into(
+        &self,
+        key: ExpertKey,
+        output: &mut [u8],
+        cancellation: &ReadCancellation,
+    ) -> Result<(), PrepareError> {
+        let record = self.index.get(key).ok_or(PrepareError::MissingExpert(key))?;
+        let gate = usize::try_from(record.gate.length()).map_err(|_| PrepareError::ArithmeticOverflow)?;
+        let up = usize::try_from(record.up.length()).map_err(|_| PrepareError::ArithmeticOverflow)?;
+        let down = usize::try_from(record.down.length()).map_err(|_| PrepareError::ArithmeticOverflow)?;
+        let expected = gate
+            .checked_add(up)
+            .and_then(|length| length.checked_add(down))
+            .ok_or(PrepareError::ArithmeticOverflow)?;
+        if output.len() != expected {
+            return Err(PrepareError::DestinationLength {
+                expected,
+                actual: output.len(),
+            });
+        }
+
+        let (gate_output, remainder) = output.split_at_mut(gate);
+        let (up_output, down_output) = remainder.split_at_mut(up);
+        self.read_segment_into(&record.gate, gate_output, cancellation)?;
+        self.read_segment_into(&record.up, up_output, cancellation)?;
+        self.read_segment_into(&record.down, down_output, cancellation)?;
+        Ok(())
+    }
+
     fn read_segment(
         &self,
         segment: &SourceSegment,
@@ -157,6 +187,20 @@ impl DirectExpertStore {
             .get(segment.shard_index)
             .ok_or(PrepareError::ShardIndexOutOfRange(segment.shard_index))?;
         Ok(reader.read_exact_at(segment.range.clone(), cancellation)?)
+    }
+
+    fn read_segment_into(
+        &self,
+        segment: &SourceSegment,
+        output: &mut [u8],
+        cancellation: &ReadCancellation,
+    ) -> Result<(), PrepareError> {
+        let reader = self
+            .readers
+            .get(segment.shard_index)
+            .ok_or(PrepareError::ShardIndexOutOfRange(segment.shard_index))?;
+        reader.read_exact_at_into(segment.range.start, output, cancellation)?;
+        Ok(())
     }
 }
 
@@ -891,6 +935,8 @@ pub enum PrepareError {
     MissingExpert(ExpertKey),
     #[error("direct expert source references missing shard index {0}")]
     ShardIndexOutOfRange(usize),
+    #[error("expert destination is {actual} bytes, expected {expected}")]
+    DestinationLength { expected: usize, actual: usize },
     #[error("expert {key:?} segment length is {actual}, expected {expected}")]
     SegmentLengthMismatch {
         key: ExpertKey,

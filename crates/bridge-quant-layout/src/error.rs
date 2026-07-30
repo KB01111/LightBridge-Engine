@@ -62,6 +62,14 @@ pub enum QuantError {
     /// An encoded Q8_K activation block has an infinite or NaN scale.
     #[error("Q8_K block {block_index} has non-finite F32 scale bits {bits:#010x}")]
     NonFiniteQ8Scale { block_index: usize, bits: u32 },
+
+    /// An explicitly requested CPU kernel is not executable on this host.
+    #[error("CPU packed-dot backend {backend} is not available on this host")]
+    CpuBackendUnavailable { backend: &'static str },
+
+    /// A row lookup exceeded the matrix shape validated at construction.
+    #[error("packed matrix row {row} is out of range for {rows} rows")]
+    MatrixRowOutOfRange { row: usize, rows: usize },
 }
 
 pub(crate) type Result<T> = std::result::Result<T, QuantError>;

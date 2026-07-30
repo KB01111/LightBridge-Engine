@@ -1,0 +1,23 @@
+[package]
+name = "bridge-kernels-cuda"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Optional versioned CUDA ABI and capability gate for LightBridge packed kernels."
+
+[features]
+default = []
+cuda-native = []
+
+[dependencies]
+bridge-quant-layout.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[build-dependencies]
+cc.workspace = true

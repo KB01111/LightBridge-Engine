@@ -572,8 +572,14 @@ fn text_and_pretty_json_are_stable_snapshots_of_the_same_owned_report() {
     let text = render_text(&report);
     let json = render_json(&report).unwrap();
 
-    assert_eq!(text, include_str!("fixtures/expected-report.txt"));
-    assert_eq!(json, include_str!("fixtures/expected-report.json"));
+    assert_eq!(
+        text.replace("\r\n", "\n"),
+        include_str!("fixtures/expected-report.txt").replace("\r\n", "\n")
+    );
+    assert_eq!(
+        json.replace("\r\n", "\n"),
+        include_str!("fixtures/expected-report.json").replace("\r\n", "\n")
+    );
     assert_eq!(serde_json::from_str::<InspectionReport>(&json).unwrap(), report);
 
     let mut without_warnings = report;

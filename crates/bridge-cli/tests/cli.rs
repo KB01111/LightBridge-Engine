@@ -568,6 +568,7 @@ fn root_help_advertises_every_implemented_product_command() {
         "chat",
         "serve",
         "bench",
+        "tune",
         "cache",
     ] {
         assert!(
@@ -596,6 +597,9 @@ fn chat_help_documents_persistent_sessions_and_cpu_backend_controls() {
     for flag in [
         "--backend",
         "--cpu-threads",
+        "--cpu-set-ids",
+        "--prefill-chunk",
+        "--speculative-ngram-t",
         "--cache-heat",
         "--chat-json",
         "--session-in",
@@ -619,6 +623,36 @@ fn bench_help_documents_true_in_process_cold_warm_measurement() {
         stdout.contains("warm-state"),
         "bench help does not distinguish resident-cache warmth:\n{stdout}"
     );
+    assert!(
+        stdout.contains("--hardware-profile"),
+        "bench help omits --hardware-profile:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--prompt-corpus"),
+        "bench help omits --prompt-corpus:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("--corpus-repeats"),
+        "bench help omits --corpus-repeats:\n{stdout}"
+    );
+    assert!(stdout.contains("--trace"), "bench help omits --trace:\n{stdout}");
+}
+
+#[test]
+fn tune_help_documents_bound_artifacts_and_output() {
+    let output = bridge(&["tune", "--help"]);
+    assert!(output.status.success(), "stderr: {}", utf8(&output.stderr));
+    let stdout = utf8(&output.stdout);
+    for flag in [
+        "--model",
+        "--sidecar",
+        "--sidecar-manifest",
+        "--profile",
+        "--output",
+        "--samples",
+    ] {
+        assert!(stdout.contains(flag), "tune help omits {flag}:\n{stdout}");
+    }
 }
 
 #[test]
@@ -639,11 +673,20 @@ fn doctor_json_reports_live_host_and_honest_backend_capabilities() {
     assert!(report["capabilities"]["cpu_simd_backend"].is_boolean());
     assert_eq!(report["capabilities"]["parallel_expert_prefetch"], true);
     assert_eq!(report["capabilities"]["persistent_expert_heat"], true);
-    assert_eq!(report["capabilities"]["cuda_backend"], false);
-    assert_eq!(report["capabilities"]["grouped_prefill"], false);
+    assert_eq!(report["capabilities"]["cuda_backend"], cfg!(windows));
+    assert!(report["capabilities"]["cuda_runtime_compiler"].is_boolean());
+    assert!(report["capabilities"]["cuda_packed_dot_oracle"].is_boolean());
+    assert!(report["capabilities"]["cuda_reusable_packed_executor"].is_boolean());
+    assert!(report["cuda_nvrtc"]["available"].is_boolean());
+    assert!(report["cuda_packed_oracle"]["available"].is_boolean());
+    assert_eq!(report["capabilities"]["grouped_prefill"], true);
+    assert_eq!(report["capabilities"]["speculative_ngram_t2"], true);
     assert_eq!(report["capabilities"]["persistent_kv"], true);
     assert_eq!(report["capabilities"]["mtp_acceleration"], false);
     assert_eq!(report["capabilities"]["server"], true);
+    assert!(report["backend_status"].as_array().unwrap().len() >= 6);
+    assert_eq!(report["npu_feasibility"]["authoritative_model_backend"], false);
+    assert_eq!(report["npu_feasibility"]["weight_conversion_permitted"], false);
 }
 
 #[test]

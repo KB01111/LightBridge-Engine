@@ -180,6 +180,10 @@ impl<'a> PackedMatrix<'a> {
         self.row_bytes
     }
 
+    pub const fn bytes(self) -> &'a [u8] {
+        self.bytes
+    }
+
     pub fn row(self, index: usize) -> &'a [u8] {
         let start = index * self.row_bytes;
         &self.bytes[start..start + self.row_bytes]

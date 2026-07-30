@@ -1,6 +1,13 @@
 use bridge_quant_layout::{
-    quantize_row_q8_k_into, vec_dot_q8_k, GgmlType, QuantError, Q8_K_BLOCK_BYTES, Q8_K_BLOCK_ELEMENTS,
+    quantize_row_q8_k_into, vec_dot_q8_k, vec_dot_q8_k_cpu_backend, CpuDotBackend, GgmlType, QuantError,
+    ValidatedQ8KMatrix, Q8_K_BLOCK_BYTES, Q8_K_BLOCK_ELEMENTS,
 };
+
+const Q4: &[u8; 432] = include_bytes!("fixtures/decode-q4-k.input.bin");
+const Q5: &[u8; 528] = include_bytes!("fixtures/decode-q5-k.input.bin");
+const IQ2: &[u8; 246] = include_bytes!("fixtures/decode-iq2-s.input.bin");
+const IQ3: &[u8; 330] = include_bytes!("fixtures/decode-iq3-s.input.bin");
+const Q8: &[u8; 876] = include_bytes!("fixtures/q8-k-activations.output-q8-k.bin");
 
 fn sentinel_bytes(len: usize) -> Vec<u8> {
     (0..len)
@@ -150,4 +157,68 @@ fn dot_validation_rejects_bad_types_lengths_and_scales() {
         vec_dot_q8_k(GgmlType::Q4_K, &q4, &nonfinite_q8, 256),
         Err(QuantError::NonFiniteQ8Scale { block_index: 0, bits })
     );
+}
+
+#[test]
+fn every_available_cpu_backend_is_bit_exact_to_the_scalar_oracle() {
+    let cases: [(GgmlType, &[u8]); 4] = [
+        (GgmlType::Q4_K, Q4),
+        (GgmlType::Q5_K, Q5),
+        (GgmlType::IQ2_S, IQ2),
+        (GgmlType::IQ3_S, IQ3),
+    ];
+    for (ty, weights) in cases {
+        let expected = vec_dot_q8_k(ty, weights, Q8, 768).unwrap();
+        for backend in [
+            CpuDotBackend::Scalar,
+            CpuDotBackend::Avx2,
+            CpuDotBackend::AvxVnni,
+            CpuDotBackend::Avx512Vnni,
+        ] {
+            if backend.available() {
+                let actual = vec_dot_q8_k_cpu_backend(ty, weights, Q8, 768, backend).unwrap();
+                assert_eq!(actual.to_bits(), expected.to_bits(), "{ty:?} {backend:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn validated_matrix_reuses_one_complete_validation_across_rows() {
+    let rows = 3;
+    let mut weights = Vec::new();
+    for row in 0..rows {
+        let mut row_data = Q4.to_vec();
+        for byte in &mut row_data[12..] {
+            *byte = byte.wrapping_add((row as u8).wrapping_mul(17));
+        }
+        weights.extend_from_slice(&row_data);
+    }
+    let expected: Vec<f32> = (0..rows)
+        .map(|row| {
+            let row_start = row * Q4.len();
+            vec_dot_q8_k(GgmlType::Q4_K, &weights[row_start..row_start + Q4.len()], Q8, 768).unwrap()
+        })
+        .collect();
+
+    for backend in [
+        CpuDotBackend::Scalar,
+        CpuDotBackend::Avx2,
+        CpuDotBackend::AvxVnni,
+        CpuDotBackend::Avx512Vnni,
+    ] {
+        if !backend.available() {
+            continue;
+        }
+        let matrix = ValidatedQ8KMatrix::new(GgmlType::Q4_K, &weights, Q8, 768, rows, backend).unwrap();
+        assert_eq!(matrix.output_rows(), rows);
+        assert_eq!(matrix.backend(), backend);
+        for row in 0..rows {
+            assert_eq!(matrix.dot_row(row).unwrap().to_bits(), expected[row].to_bits());
+        }
+        assert_eq!(
+            matrix.dot_row(rows),
+            Err(QuantError::MatrixRowOutOfRange { row: rows, rows })
+        );
+    }
 }

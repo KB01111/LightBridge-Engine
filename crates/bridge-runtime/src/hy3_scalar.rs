@@ -1,4 +1,6 @@
+use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bridge_cache::{CacheConfig, CacheLease, CacheStats, CompressedCache, LoadError};
 use bridge_core::ggml_type::GgmlType;
@@ -6,8 +8,10 @@ use bridge_core::sys::memory_status;
 use bridge_format::{ExpertKey, Sidecar};
 use bridge_gguf::Endianness;
 use bridge_gguf_split::{open_set, GgufSet};
-use bridge_io_windows::{file_storage, PositionedFile, ReadCancellation, ReadLimits};
-use bridge_kernels_cpu::{CpuBackend, CpuBackendConfig};
+use bridge_io_windows::{
+    file_storage, PositionedFile, ReadCancellation, ReadLimits, ReadSlotPool, SlotPoolError,
+};
+use bridge_kernels_cpu::{CpuBackend, CpuBackendConfig, CpuCapabilities};
 use bridge_kernels_reference::{
     gemv_into, hy3_block_forward_token, hy3_moe_finish_token, hy3_moe_route_token, weighted_rms_norm_into,
     Hy3AttentionWeights, Hy3BlockExecution, Hy3BlockScratch, Hy3BlockWeights, Hy3FeedForwardWeights,
@@ -32,6 +36,8 @@ pub const SELECTED_HY3_IQ2_M_SHA256: &str =
 pub const DEFAULT_MEMORY_HEADROOM_BYTES: usize = 512 * 1024 * 1024;
 
 const HASH_CHUNK_BYTES: usize = 8 * 1024 * 1024;
+const MAX_STREAMING_EXPERTS: usize = 64;
+const MAX_PREFILL_CHUNK: usize = 8;
 
 #[derive(Debug, Clone)]
 pub enum ExpertSourceOptions {
@@ -52,6 +58,9 @@ pub struct Hy3ScalarOptions {
     pub cache_admit_after_requests: u64,
     pub execution_mode: ReferenceExecutionMode,
     pub cpu_threads: usize,
+    pub cpu_set_ids: Vec<u32>,
+    pub prefill_chunk: usize,
+    pub speculative_ngram_t: Option<usize>,
     pub memory_headroom_bytes: usize,
     pub expert_source: ExpertSourceOptions,
 }
@@ -65,6 +74,9 @@ impl Default for Hy3ScalarOptions {
             cache_admit_after_requests: 2,
             execution_mode: ReferenceExecutionMode::CpuParallelQ8K,
             cpu_threads: bridge_kernels_cpu::recommended_thread_count(),
+            cpu_set_ids: Vec::new(),
+            prefill_chunk: 1,
+            speculative_ngram_t: None,
             memory_headroom_bytes: DEFAULT_MEMORY_HEADROOM_BYTES,
             expert_source: ExpertSourceOptions::Direct,
         }
@@ -76,7 +88,10 @@ pub struct Hy3ScalarModel {
     config: Hy3Config,
     context_capacity: usize,
     execution_mode: ReferenceExecutionMode,
+    cuda_disabled: AtomicBool,
     cpu_backend: Option<CpuBackend>,
+    prefill_chunk: usize,
+    speculative_ngram_t: Option<usize>,
     kv_page_tokens: usize,
     source_paths: Vec<PathBuf>,
     source_sha256: Vec<String>,
@@ -88,6 +103,7 @@ pub struct Hy3ScalarModel {
     output: OwnedMatrix,
     rope: Hy3RopeParams,
     expert_source: Option<ExpertSource>,
+    expert_read_slots: Option<ReadSlotPool>,
     expert_cache: CompressedCache<ExpertKey>,
 }
 
@@ -283,7 +299,7 @@ impl Hy3ScalarModel {
     }
 
     pub fn backend_name(&self) -> &'static str {
-        match self.execution_mode {
+        match self.active_execution_mode() {
             ReferenceExecutionMode::DequantF32 => "scalar_reference_dequant_f32",
             ReferenceExecutionMode::LlamaQ8K => "scalar_reference_q8_k",
             ReferenceExecutionMode::CpuParallelQ8K => self
@@ -291,6 +307,9 @@ impl Hy3ScalarModel {
                 .as_ref()
                 .map(CpuBackend::backend_name)
                 .unwrap_or("cpu_parallel_scalar_q8_k"),
+            ReferenceExecutionMode::CpuParallelAvxVnni => "cpu_parallel_avx_vnni_q8_k",
+            ReferenceExecutionMode::CpuParallelAvx512Vnni => "cpu_parallel_avx512_vnni_q8_k",
+            ReferenceExecutionMode::CudaQ8K => "cuda_streaming_q8_k",
         }
     }
 
@@ -298,8 +317,35 @@ impl Hy3ScalarModel {
         self.cpu_backend.as_ref().map(|backend| backend.config().threads)
     }
 
+    pub fn cpu_set_ids(&self) -> Option<&[u32]> {
+        self.cpu_backend.as_ref().map(CpuBackend::cpu_set_ids)
+    }
+
     pub fn cpu_simd_active(&self) -> bool {
-        self.cpu_backend.as_ref().is_some_and(CpuBackend::simd_active)
+        match self.active_execution_mode() {
+            ReferenceExecutionMode::CpuParallelAvxVnni | ReferenceExecutionMode::CpuParallelAvx512Vnni => {
+                self.cpu_backend.as_ref().is_some_and(CpuBackend::simd_active)
+            }
+            ReferenceExecutionMode::CudaQ8K => false,
+            _ => self.cpu_backend.as_ref().is_some_and(CpuBackend::simd_active),
+        }
+    }
+
+    pub fn cuda_fallback_active(&self) -> bool {
+        self.execution_mode == ReferenceExecutionMode::CudaQ8K && self.cuda_disabled.load(Ordering::Acquire)
+    }
+
+    pub fn fall_back_to_cpu(&self) -> bool {
+        self.execution_mode == ReferenceExecutionMode::CudaQ8K
+            && !self.cuda_disabled.swap(true, Ordering::AcqRel)
+    }
+
+    fn active_execution_mode(&self) -> ReferenceExecutionMode {
+        if self.cuda_fallback_active() {
+            ReferenceExecutionMode::CpuParallelQ8K
+        } else {
+            self.execution_mode
+        }
     }
 
     pub fn parallel_expert_prefetch(&self) -> bool {
@@ -379,10 +425,47 @@ impl Hy3ScalarModel {
                 return Err(Hy3ScalarError::BigEndianPayload(shard.path().to_owned()));
             }
         }
+        if options.execution_mode == ReferenceExecutionMode::CudaQ8K {
+            let qualification = bridge_kernels_cuda::runtime_reusable_packed_q8k_canary()?;
+            if !qualification.bit_exact || !qualification.deterministic {
+                return Err(Hy3ScalarError::CudaQualification {
+                    bit_exact: qualification.bit_exact,
+                    deterministic: qualification.deterministic,
+                });
+            }
+        }
         let cpu_backend = match options.execution_mode {
-            ReferenceExecutionMode::CpuParallelQ8K => Some(CpuBackend::new(CpuBackendConfig {
-                threads: options.cpu_threads,
-            })?),
+            ReferenceExecutionMode::CpuParallelQ8K
+            | ReferenceExecutionMode::CpuParallelAvxVnni
+            | ReferenceExecutionMode::CpuParallelAvx512Vnni
+            | ReferenceExecutionMode::CudaQ8K => {
+                let capabilities = CpuCapabilities::detect();
+                match options.execution_mode {
+                    ReferenceExecutionMode::CpuParallelAvxVnni
+                        if !capabilities.avx_vnni_dot_kernel_available() =>
+                    {
+                        return Err(Hy3ScalarError::BackendUnavailable {
+                            backend: "cpu_parallel_avx_vnni_q8_k",
+                            reason: "AVX2 plus AVX-VNNI are required",
+                        });
+                    }
+                    ReferenceExecutionMode::CpuParallelAvx512Vnni
+                        if !capabilities.avx512_dot_kernel_available() =>
+                    {
+                        return Err(Hy3ScalarError::BackendUnavailable {
+                            backend: "cpu_parallel_avx512_vnni_q8_k",
+                            reason: "AVX-512F/BW/VL plus AVX-512 VNNI are required",
+                        });
+                    }
+                    _ => {}
+                }
+                Some(CpuBackend::new_with_cpu_set(
+                    CpuBackendConfig {
+                        threads: options.cpu_threads,
+                    },
+                    &options.cpu_set_ids,
+                )?)
+            }
             ReferenceExecutionMode::DequantF32 | ReferenceExecutionMode::LlamaQ8K => None,
         };
         let model_fingerprint = build_model_fingerprint(&set, &source_sha256)?;
@@ -453,6 +536,7 @@ impl Hy3ScalarModel {
         };
         let source_paths = set.files().iter().map(|shard| shard.path().to_owned()).collect();
         let rope = Hy3RopeParams::from_config(&config)?;
+        let expert_read_slots = build_expert_read_slots(&layers, &config, options.expert_cache_bytes)?;
         let expert_cache = CompressedCache::new(CacheConfig {
             capacity_bytes: options.expert_cache_bytes,
             admit_after_requests: options.cache_admit_after_requests,
@@ -462,7 +546,10 @@ impl Hy3ScalarModel {
             config,
             context_capacity: options.context_capacity,
             execution_mode: options.execution_mode,
+            cuda_disabled: AtomicBool::new(false),
             cpu_backend,
+            prefill_chunk: options.prefill_chunk,
+            speculative_ngram_t: options.speculative_ngram_t,
             kv_page_tokens: options.kv_page_tokens,
             source_paths,
             source_sha256,
@@ -474,6 +561,7 @@ impl Hy3ScalarModel {
             output,
             rope,
             expert_source,
+            expert_read_slots,
             expert_cache,
         })
     }
@@ -483,21 +571,460 @@ impl Hy3ScalarModel {
         session: &mut Hy3ScalarSession,
         token_id: u32,
         logits: &mut [f32],
+        project_logits: bool,
     ) -> Result<(), Hy3ScalarError> {
         let committed_position = session.position;
-        let result = match &self.cpu_backend {
-            Some(backend) => backend.install(|| self.evaluate_inner(session, token_id, logits)),
-            None => self.evaluate_inner(session, token_id, logits),
+        let error = match self.evaluate_once(session, token_id, logits, project_logits) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
         };
-        if let Err(error) = result {
-            if let Err(rollback) = session.rollback_to(committed_position) {
-                return Err(Hy3ScalarError::SessionRollback {
-                    original: error.to_string(),
-                    rollback: rollback.to_string(),
+        rollback_after_error(session, committed_position, &error)?;
+        if self.activate_cuda_fallback(&error) {
+            let cuda = error.to_string();
+            return match self.evaluate_once(session, token_id, logits, project_logits) {
+                Ok(()) => Ok(()),
+                Err(cpu) => {
+                    rollback_after_error(session, committed_position, &cpu)?;
+                    Err(Hy3ScalarError::CudaFallbackFailed {
+                        cuda,
+                        cpu: cpu.to_string(),
+                    })
+                }
+            };
+        }
+        Err(error)
+    }
+
+    fn evaluate_once(
+        &self,
+        session: &mut Hy3ScalarSession,
+        token_id: u32,
+        logits: &mut [f32],
+        project_logits: bool,
+    ) -> Result<(), Hy3ScalarError> {
+        match &self.cpu_backend {
+            Some(backend) => {
+                backend.install(|| self.evaluate_inner(session, token_id, logits, project_logits))
+            }
+            None => self.evaluate_inner(session, token_id, logits, project_logits),
+        }
+    }
+
+    fn load_expert_lease(
+        &self,
+        key: ExpertKey,
+        layout: &ExpertPayloadLayout,
+    ) -> Result<CacheLease<ExpertKey>, Hy3ScalarError> {
+        let expected = layout.total_bytes()?;
+        let source = self
+            .expert_source
+            .as_ref()
+            .ok_or(Hy3ScalarError::MissingExpertSource)?;
+        let slots = self
+            .expert_read_slots
+            .as_ref()
+            .ok_or(Hy3ScalarError::MissingExpertReadSlots)?;
+        self.expert_cache
+            .get_or_try_insert_read_slot_charged(key, expected, slots.slot_bytes(), || {
+                let cancellation = ReadCancellation::new();
+                let mut slot = slots.acquire(&cancellation)?;
+                let actual = slot.as_slice().len();
+                let output = slot
+                    .as_mut_slice()
+                    .get_mut(..expected)
+                    .ok_or(ExpertReadError::PayloadLength { expected, actual })?;
+                source.read_tight_into(key, layout, output, &cancellation)?;
+                Ok(slot)
+            })
+            .map_err(Hy3ScalarError::ExpertCache)
+    }
+
+    fn evaluate_grouped(
+        &self,
+        session: &mut Hy3ScalarSession,
+        token_ids: &[u32],
+        logits: &mut [f32],
+        project_logits: bool,
+    ) -> Result<(), Hy3ScalarError> {
+        if token_ids.len() == 1 {
+            return self.evaluate(session, token_ids[0], logits, project_logits);
+        }
+        let committed_position = session.position;
+        let error = match self.evaluate_grouped_once(session, token_ids, logits, project_logits) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        rollback_after_error(session, committed_position, &error)?;
+        if self.activate_cuda_fallback(&error) {
+            let cuda = error.to_string();
+            return match self.evaluate_grouped_once(session, token_ids, logits, project_logits) {
+                Ok(()) => Ok(()),
+                Err(cpu) => {
+                    rollback_after_error(session, committed_position, &cpu)?;
+                    Err(Hy3ScalarError::CudaFallbackFailed {
+                        cuda,
+                        cpu: cpu.to_string(),
+                    })
+                }
+            };
+        }
+        Err(error)
+    }
+
+    fn evaluate_grouped_once(
+        &self,
+        session: &mut Hy3ScalarSession,
+        token_ids: &[u32],
+        logits: &mut [f32],
+        project_logits: bool,
+    ) -> Result<(), Hy3ScalarError> {
+        match &self.cpu_backend {
+            Some(backend) => {
+                backend.install(|| self.evaluate_grouped_inner(session, token_ids, logits, project_logits))
+            }
+            None => self.evaluate_grouped_inner(session, token_ids, logits, project_logits),
+        }
+    }
+
+    fn evaluate_speculative_grouped(
+        &self,
+        session: &mut Hy3ScalarSession,
+        token_ids: &[u32],
+        logits: &mut [f32],
+    ) -> Result<(), Hy3ScalarError> {
+        let expected = self
+            .config
+            .vocabulary_size
+            .checked_mul(u32::try_from(token_ids.len()).map_err(|_| Hy3ScalarError::ArithmeticOverflow)?)
+            .ok_or(Hy3ScalarError::ArithmeticOverflow)? as usize;
+        if token_ids.len() != 2 || logits.len() != expected {
+            return Err(Hy3ScalarError::SpeculativeLogitShape {
+                tokens: token_ids.len(),
+                vocabulary_size: self.config.vocabulary_size as usize,
+                actual: logits.len(),
+            });
+        }
+        let committed_position = session.position;
+        let error = match self.evaluate_speculative_grouped_once(session, token_ids, logits) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        rollback_after_error(session, committed_position, &error)?;
+        if self.activate_cuda_fallback(&error) {
+            let cuda = error.to_string();
+            return match self.evaluate_speculative_grouped_once(session, token_ids, logits) {
+                Ok(()) => Ok(()),
+                Err(cpu) => {
+                    rollback_after_error(session, committed_position, &cpu)?;
+                    Err(Hy3ScalarError::CudaFallbackFailed {
+                        cuda,
+                        cpu: cpu.to_string(),
+                    })
+                }
+            };
+        }
+        Err(error)
+    }
+
+    fn evaluate_speculative_grouped_once(
+        &self,
+        session: &mut Hy3ScalarSession,
+        token_ids: &[u32],
+        logits: &mut [f32],
+    ) -> Result<(), Hy3ScalarError> {
+        let mut execute = || -> Result<(), Hy3ScalarError> {
+            self.evaluate_grouped_inner(session, token_ids, &mut [], false)?;
+            self.project_grouped_logits_inner(session, token_ids.len(), logits)
+        };
+        match &self.cpu_backend {
+            Some(backend) => backend.install(execute),
+            None => execute(),
+        }
+    }
+
+    fn activate_cuda_fallback(&self, error: &Hy3ScalarError) -> bool {
+        if self.execution_mode == ReferenceExecutionMode::CudaQ8K
+            && matches!(
+                error,
+                Hy3ScalarError::Kernel(bridge_kernels_reference::KernelError::Cuda { .. })
+            )
+        {
+            self.fall_back_to_cpu();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn project_grouped_logits_inner(
+        &self,
+        session: &mut Hy3ScalarSession,
+        token_count: usize,
+        logits: &mut [f32],
+    ) -> Result<(), Hy3ScalarError> {
+        let execution_mode = self.active_execution_mode();
+        let vocabulary_size = self.config.vocabulary_size as usize;
+        let expected = vocabulary_size
+            .checked_mul(token_count)
+            .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+        if logits.len() != expected {
+            return Err(Hy3ScalarError::SpeculativeLogitShape {
+                tokens: token_count,
+                vocabulary_size,
+                actual: logits.len(),
+            });
+        }
+        let hidden_width = self.config.embedding_length as usize;
+        for (position, row) in logits.chunks_exact_mut(vocabulary_size).enumerate() {
+            let hidden = grouped_position(&session.batch_hidden, position, hidden_width)?;
+            weighted_rms_norm_into(
+                hidden,
+                &self.output_norm,
+                self.config.rms_epsilon,
+                &mut session.final_normalized,
+            )?;
+            gemv_into(
+                execution_mode,
+                self.output.view()?,
+                &session.final_normalized,
+                row,
+                &mut session.decoded_block,
+                &mut session.q8,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn evaluate_grouped_inner(
+        &self,
+        session: &mut Hy3ScalarSession,
+        token_ids: &[u32],
+        logits: &mut [f32],
+        project_logits: bool,
+    ) -> Result<(), Hy3ScalarError> {
+        let execution_mode = self.active_execution_mode();
+        if token_ids.is_empty() || token_ids.len() > self.prefill_chunk || token_ids.len() > MAX_PREFILL_CHUNK
+        {
+            return Err(Hy3ScalarError::GroupedTokenCount {
+                actual: token_ids.len(),
+                maximum: self.prefill_chunk.min(MAX_PREFILL_CHUNK),
+            });
+        }
+        if project_logits && logits.len() != self.config.vocabulary_size as usize {
+            return Err(Hy3ScalarError::LogitLength {
+                expected: self.config.vocabulary_size as usize,
+                actual: logits.len(),
+            });
+        }
+        for &token_id in token_ids {
+            if token_id as usize >= self.config.vocabulary_size as usize {
+                return Err(Hy3ScalarError::TokenOutOfRange {
+                    token_id,
+                    vocabulary_size: self.config.vocabulary_size as usize,
                 });
             }
-            return Err(error);
         }
+        let end_position = session
+            .position
+            .checked_add(token_ids.len())
+            .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+        if end_position > self.context_capacity {
+            return Err(Hy3ScalarError::ContextExhausted {
+                position: session.position,
+                capacity: self.context_capacity,
+            });
+        }
+
+        let hidden_width = self.config.embedding_length as usize;
+        let embeddings = self.embeddings.view()?;
+        for (position, &token_id) in token_ids.iter().enumerate() {
+            bridge_quant_layout::decode_row_into(
+                self.embeddings.ty,
+                embeddings.row(token_id as usize),
+                self.embeddings.input_width,
+                grouped_position_mut(&mut session.batch_hidden, position, hidden_width)?,
+            )?;
+        }
+
+        for (layer_index, layer) in self.layers.iter().enumerate() {
+            let layer_number = u32::try_from(layer_index).map_err(|_| Hy3ScalarError::ArithmeticOverflow)?;
+            match &layer.feed_forward {
+                FeedForwardWeights::Dense(expert) => {
+                    let weights = Hy3BlockWeights {
+                        attention: layer.attention.view(&self.config)?,
+                        ffn_norm: &layer.ffn_norm,
+                        feed_forward: Hy3FeedForwardWeights::Dense(expert.view()?),
+                    };
+                    for position in 0..token_ids.len() {
+                        let execution = Hy3BlockExecution {
+                            mode: execution_mode,
+                            layer: layer_index,
+                            position: (session.position + position) as u64,
+                            rope: self.rope,
+                            rms_epsilon: self.config.rms_epsilon,
+                        };
+                        let hidden = grouped_position_mut(&mut session.batch_hidden, position, hidden_width)?;
+                        let scratch = grouped_dense_scratch_mut(
+                            &mut session.dense_scratch,
+                            &mut session.batch_dense_scratch,
+                            position,
+                        )?;
+                        hy3_block_forward_token(execution, weights, &mut session.cache, hidden, scratch)?;
+                    }
+                }
+                FeedForwardWeights::Moe(moe) => {
+                    let streaming = moe.streaming_weights(&layer.attention, &layer.ffn_norm, &self.config)?;
+                    for position in 0..token_ids.len() {
+                        let execution = Hy3BlockExecution {
+                            mode: execution_mode,
+                            layer: layer_index,
+                            position: (session.position + position) as u64,
+                            rope: self.rope,
+                            rms_epsilon: self.config.rms_epsilon,
+                        };
+                        let hidden = grouped_position_mut(&mut session.batch_hidden, position, hidden_width)?;
+                        let scratch = grouped_moe_scratch_mut(
+                            &mut session.moe_scratch,
+                            &mut session.batch_moe_scratch,
+                            position,
+                        )?;
+                        hy3_moe_route_token(execution, streaming, &mut session.cache, hidden, scratch)?;
+                        if scratch.routed().len() > MAX_STREAMING_EXPERTS {
+                            return Err(Hy3ScalarError::SelectedExpertCount {
+                                actual: scratch.routed().len(),
+                                maximum: MAX_STREAMING_EXPERTS,
+                            });
+                        }
+                        let routes = session.batch_routes.get_mut(position).ok_or(
+                            Hy3ScalarError::GroupedScratchMissing {
+                                kind: "route record",
+                                position,
+                            },
+                        )?;
+                        routes.clear();
+                        routes.extend_from_slice(scratch.routed());
+                    }
+
+                    session.expert_needed.fill(false);
+                    let route_expert_count = session.expert_needed.len();
+                    for routes in session.batch_routes.iter().take(token_ids.len()) {
+                        for route in routes {
+                            let needed = session.expert_needed.get_mut(route.expert_id as usize).ok_or(
+                                Hy3ScalarError::SelectedExpertId {
+                                    expert_id: route.expert_id,
+                                    expert_count: route_expert_count,
+                                },
+                            )?;
+                            *needed = true;
+                        }
+                    }
+                    let expert_count = self.config.expert_count as usize;
+                    if session.expert_leases.len() != expert_count {
+                        session.expert_leases.clear();
+                        session.expert_leases.resize_with(expert_count, || None);
+                    } else {
+                        for lease in &mut session.expert_leases {
+                            *lease = None;
+                        }
+                    }
+                    let load_expert = |expert_id: usize| {
+                        self.load_expert_lease(
+                            ExpertKey {
+                                layer: layer_number,
+                                expert: expert_id as u32,
+                            },
+                            &moe.expert_layout,
+                        )
+                    };
+                    if self.cpu_backend.is_some() {
+                        session
+                            .expert_leases
+                            .par_iter_mut()
+                            .zip(session.expert_needed.par_iter())
+                            .enumerate()
+                            .try_for_each(|(expert_id, (slot, needed))| {
+                                if *needed {
+                                    *slot = Some(load_expert(expert_id)?);
+                                }
+                                Ok::<(), Hy3ScalarError>(())
+                            })?;
+                    } else {
+                        for (expert_id, (slot, needed)) in session
+                            .expert_leases
+                            .iter_mut()
+                            .zip(&session.expert_needed)
+                            .enumerate()
+                        {
+                            if *needed {
+                                *slot = Some(load_expert(expert_id)?);
+                            }
+                        }
+                    }
+
+                    let shared = moe.shared.view()?;
+                    for position in 0..token_ids.len() {
+                        let routes = session.batch_routes.get(position).ok_or(
+                            Hy3ScalarError::GroupedScratchMissing {
+                                kind: "route record",
+                                position,
+                            },
+                        )?;
+                        let mut selected_storage =
+                            [MaybeUninit::<SelectedExpert<'_>>::uninit(); MAX_STREAMING_EXPERTS];
+                        for (index, route) in routes.iter().enumerate() {
+                            let lease = session
+                                .expert_leases
+                                .get(route.expert_id as usize)
+                                .and_then(Option::as_ref)
+                                .ok_or(Hy3ScalarError::MissingExpertLease)?;
+                            selected_storage[index].write(SelectedExpert {
+                                expert_id: route.expert_id,
+                                coefficient: route.coefficient,
+                                expert: moe.expert_layout.view(lease.bytes())?,
+                            });
+                        }
+                        // SAFETY: `routes.len()` contiguous entries were
+                        // initialized and SelectedExpert has no drop glue.
+                        let selected = unsafe {
+                            std::slice::from_raw_parts(
+                                selected_storage.as_ptr().cast::<SelectedExpert<'_>>(),
+                                routes.len(),
+                            )
+                        };
+                        let hidden = grouped_position_mut(&mut session.batch_hidden, position, hidden_width)?;
+                        let scratch = grouped_moe_scratch_mut(
+                            &mut session.moe_scratch,
+                            &mut session.batch_moe_scratch,
+                            position,
+                        )?;
+                        hy3_moe_finish_token(execution_mode, selected, shared, hidden, scratch)?;
+                    }
+                    for lease in &mut session.expert_leases {
+                        *lease = None;
+                    }
+                }
+            }
+        }
+
+        let final_hidden = grouped_position(&session.batch_hidden, token_ids.len() - 1, hidden_width)?;
+        session.hidden.copy_from_slice(final_hidden);
+        if project_logits {
+            weighted_rms_norm_into(
+                final_hidden,
+                &self.output_norm,
+                self.config.rms_epsilon,
+                &mut session.final_normalized,
+            )?;
+            gemv_into(
+                execution_mode,
+                self.output.view()?,
+                &session.final_normalized,
+                logits,
+                &mut session.decoded_block,
+                &mut session.q8,
+            )?;
+        }
+        session.position = end_position;
         Ok(())
     }
 
@@ -506,8 +1033,10 @@ impl Hy3ScalarModel {
         session: &mut Hy3ScalarSession,
         token_id: u32,
         logits: &mut [f32],
+        project_logits: bool,
     ) -> Result<(), Hy3ScalarError> {
-        if logits.len() != self.config.vocabulary_size as usize {
+        let execution_mode = self.active_execution_mode();
+        if project_logits && logits.len() != self.config.vocabulary_size as usize {
             return Err(Hy3ScalarError::LogitLength {
                 expected: self.config.vocabulary_size as usize,
                 actual: logits.len(),
@@ -537,7 +1066,7 @@ impl Hy3ScalarModel {
         for (layer_index, layer) in self.layers.iter().enumerate() {
             let layer_number = u32::try_from(layer_index).map_err(|_| Hy3ScalarError::ArithmeticOverflow)?;
             let execution = Hy3BlockExecution {
-                mode: self.execution_mode,
+                mode: execution_mode,
                 layer: layer_index,
                 position: session.position as u64,
                 rope: self.rope,
@@ -571,56 +1100,61 @@ impl Hy3ScalarModel {
                         &mut session.hidden,
                         scratch,
                     )?;
-                    let routes = scratch.routed().to_vec();
+                    session.routes.clear();
+                    session.routes.extend_from_slice(scratch.routed());
+                    if session.routes.len() > MAX_STREAMING_EXPERTS {
+                        return Err(Hy3ScalarError::SelectedExpertCount {
+                            actual: session.routes.len(),
+                            maximum: MAX_STREAMING_EXPERTS,
+                        });
+                    }
                     session.expert_leases.clear();
                     let load_route = |route: &bridge_model_hy3::RoutedExpert| {
                         let key = ExpertKey {
                             layer: layer_number,
                             expert: route.expert_id,
                         };
-                        let expected = moe.expert_layout.total_bytes()?;
-                        let source = self
-                            .expert_source
-                            .as_ref()
-                            .ok_or(Hy3ScalarError::MissingExpertSource)?;
-                        let layout = &moe.expert_layout;
-                        self.expert_cache
-                            .get_or_try_insert(key, expected, || source.read_tight(key, layout))
-                            .map_err(Hy3ScalarError::ExpertCache)
+                        self.load_expert_lease(key, &moe.expert_layout)
                     };
-                    session.expert_leases = if self.cpu_backend.is_some() {
-                        routes.par_iter().map(load_route).collect::<Result<Vec<_>, _>>()?
+                    session.expert_leases.resize_with(session.routes.len(), || None);
+                    if self.cpu_backend.is_some() {
+                        session
+                            .expert_leases
+                            .par_iter_mut()
+                            .zip(session.routes.par_iter())
+                            .try_for_each(|(slot, route)| {
+                                *slot = Some(load_route(route)?);
+                                Ok::<(), Hy3ScalarError>(())
+                            })?;
                     } else {
-                        let mut leases = Vec::new();
-                        leases.try_reserve_exact(routes.len()).map_err(|_| {
-                            Hy3ScalarError::AllocationFailed {
-                                context: "selected expert leases",
-                                requested: routes.len(),
-                            }
-                        })?;
-                        for route in &routes {
-                            leases.push(load_route(route)?);
+                        for (slot, route) in session.expert_leases.iter_mut().zip(&session.routes) {
+                            *slot = Some(load_route(route)?);
                         }
-                        leases
-                    };
+                    }
 
-                    let mut selected = Vec::new();
-                    selected.try_reserve_exact(routes.len()).map_err(|_| {
-                        Hy3ScalarError::AllocationFailed {
-                            context: "selected expert views",
-                            requested: routes.len(),
-                        }
-                    })?;
-                    for (route, lease) in routes.iter().zip(&session.expert_leases) {
-                        selected.push(SelectedExpert {
+                    let mut selected_storage =
+                        [MaybeUninit::<SelectedExpert<'_>>::uninit(); MAX_STREAMING_EXPERTS];
+                    for (index, (route, lease)) in
+                        session.routes.iter().zip(&session.expert_leases).enumerate()
+                    {
+                        let lease = lease.as_ref().ok_or(Hy3ScalarError::MissingExpertLease)?;
+                        selected_storage[index].write(SelectedExpert {
                             expert_id: route.expert_id,
                             coefficient: route.coefficient,
                             expert: moe.expert_layout.view(lease.bytes())?,
                         });
                     }
+                    // SAFETY: exactly `routes.len()` contiguous entries were
+                    // initialized above and `SelectedExpert` has no drop glue.
+                    let selected = unsafe {
+                        std::slice::from_raw_parts(
+                            selected_storage.as_ptr().cast::<SelectedExpert<'_>>(),
+                            session.routes.len(),
+                        )
+                    };
                     hy3_moe_finish_token(
-                        self.execution_mode,
-                        &selected,
+                        execution_mode,
+                        selected,
                         moe.shared.view()?,
                         &mut session.hidden,
                         scratch,
@@ -630,20 +1164,22 @@ impl Hy3ScalarModel {
             }
         }
 
-        weighted_rms_norm_into(
-            &session.hidden,
-            &self.output_norm,
-            self.config.rms_epsilon,
-            &mut session.final_normalized,
-        )?;
-        gemv_into(
-            self.execution_mode,
-            self.output.view()?,
-            &session.final_normalized,
-            logits,
-            &mut session.decoded_block,
-            &mut session.q8,
-        )?;
+        if project_logits {
+            weighted_rms_norm_into(
+                &session.hidden,
+                &self.output_norm,
+                self.config.rms_epsilon,
+                &mut session.final_normalized,
+            )?;
+            gemv_into(
+                execution_mode,
+                self.output.view()?,
+                &session.final_normalized,
+                logits,
+                &mut session.decoded_block,
+                &mut session.q8,
+            )?;
+        }
         session.position += 1;
         Ok(())
     }
@@ -661,6 +1197,14 @@ impl CausalModel for Hy3ScalarModel {
         self.context_capacity
     }
 
+    fn preferred_prefill_chunk(&self) -> usize {
+        self.prefill_chunk
+    }
+
+    fn speculative_ngram_t(&self) -> Option<usize> {
+        self.speculative_ngram_t
+    }
+
     fn new_session(&self) -> Result<Self::Session, Self::Error> {
         let dense = self.layers.first().ok_or(Hy3ScalarError::MissingDenseLayer)?;
         let FeedForwardWeights::Dense(dense_expert) = &dense.feed_forward else {
@@ -671,7 +1215,7 @@ impl CausalModel for Hy3ScalarModel {
             ffn_norm: &dense.ffn_norm,
             feed_forward: Hy3FeedForwardWeights::Dense(dense_expert.view()?),
         };
-        let moe_scratch = self
+        let streaming_moe = self
             .layers
             .iter()
             .find_map(|layer| match &layer.feed_forward {
@@ -680,10 +1224,66 @@ impl CausalModel for Hy3ScalarModel {
                 }
                 FeedForwardWeights::Dense(_) => None,
             })
-            .transpose()?
+            .transpose()?;
+        let moe_scratch = streaming_moe
             .map(|weights| Hy3BlockScratch::new_streaming_moe(weights, self.context_capacity))
             .transpose()?;
+        let extra_positions = self.prefill_chunk.saturating_sub(1);
+        let mut batch_dense_scratch = Vec::new();
+        batch_dense_scratch
+            .try_reserve_exact(extra_positions)
+            .map_err(|_| Hy3ScalarError::AllocationFailed {
+                context: "grouped dense scratch table",
+                requested: extra_positions,
+            })?;
+        for _ in 0..extra_positions {
+            batch_dense_scratch.push(Hy3BlockScratch::new(dense_weights, self.context_capacity)?);
+        }
+        let mut batch_moe_scratch = Vec::new();
+        if let Some(weights) = streaming_moe {
+            batch_moe_scratch
+                .try_reserve_exact(extra_positions)
+                .map_err(|_| Hy3ScalarError::AllocationFailed {
+                    context: "grouped MoE scratch table",
+                    requested: extra_positions,
+                })?;
+            for _ in 0..extra_positions {
+                batch_moe_scratch.push(Hy3BlockScratch::new_streaming_moe(
+                    weights,
+                    self.context_capacity,
+                )?);
+            }
+        }
         let hidden_width = self.config.embedding_length as usize;
+        let batch_hidden_len = hidden_width
+            .checked_mul(self.prefill_chunk)
+            .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+        let mut batch_routes = Vec::new();
+        batch_routes
+            .try_reserve_exact(self.prefill_chunk)
+            .map_err(|_| Hy3ScalarError::AllocationFailed {
+                context: "grouped route table",
+                requested: self.prefill_chunk,
+            })?;
+        for _ in 0..self.prefill_chunk {
+            let mut routes = Vec::new();
+            routes
+                .try_reserve_exact(self.config.expert_used_count as usize)
+                .map_err(|_| Hy3ScalarError::AllocationFailed {
+                    context: "grouped position routes",
+                    requested: self.config.expert_used_count as usize,
+                })?;
+            batch_routes.push(routes);
+        }
+        let expert_count = self.config.expert_count as usize;
+        let mut expert_leases = Vec::new();
+        expert_leases
+            .try_reserve_exact(expert_count)
+            .map_err(|_| Hy3ScalarError::AllocationFailed {
+                context: "expert lease table",
+                requested: expert_count,
+            })?;
+        expert_leases.resize_with(expert_count, || None);
         Ok(Hy3ScalarSession {
             cache: PagedKvCache::new_lazy(
                 self.config.block_count as usize,
@@ -695,14 +1295,20 @@ impl CausalModel for Hy3ScalarModel {
             )?,
             dense_scratch: Hy3BlockScratch::new(dense_weights, self.context_capacity)?,
             moe_scratch,
+            batch_dense_scratch,
+            batch_moe_scratch,
             hidden: fallible_zeroed(hidden_width, "hidden state")?,
+            batch_hidden: fallible_zeroed(batch_hidden_len, "grouped hidden states")?,
             final_normalized: fallible_zeroed(hidden_width, "final normalized state")?,
             decoded_block: fallible_zeroed(256, "output decoded block")?,
             q8: fallible_zeroed(
                 bridge_kernels_reference::required_q8_k_bytes(hidden_width)?,
                 "output Q8_K row",
             )?,
-            expert_leases: Vec::with_capacity(self.config.expert_used_count as usize),
+            expert_leases,
+            expert_needed: fallible_zeroed(expert_count, "grouped expert union")?,
+            routes: Vec::with_capacity(self.config.expert_used_count as usize),
+            batch_routes,
             position: 0,
         })
     }
@@ -713,8 +1319,22 @@ impl CausalModel for Hy3ScalarModel {
         if let Some(scratch) = &mut session.moe_scratch {
             scratch.reset();
         }
-        session.expert_leases.clear();
+        for scratch in &mut session.batch_dense_scratch {
+            scratch.reset();
+        }
+        for scratch in &mut session.batch_moe_scratch {
+            scratch.reset();
+        }
+        for lease in &mut session.expert_leases {
+            *lease = None;
+        }
+        session.expert_needed.fill(false);
+        session.routes.clear();
+        for routes in &mut session.batch_routes {
+            routes.clear();
+        }
         session.hidden.fill(0.0);
+        session.batch_hidden.fill(0.0);
         session.final_normalized.fill(0.0);
         session.position = 0;
     }
@@ -729,7 +1349,44 @@ impl CausalModel for Hy3ScalarModel {
         token_id: u32,
         logits: &mut [f32],
     ) -> Result<(), Self::Error> {
-        self.evaluate(session, token_id, logits)
+        self.evaluate(session, token_id, logits, true)
+    }
+
+    fn evaluate_token_with_projection(
+        &self,
+        session: &mut Self::Session,
+        token_id: u32,
+        logits: &mut [f32],
+        project_logits: bool,
+    ) -> Result<(), Self::Error> {
+        self.evaluate(session, token_id, logits, project_logits)
+    }
+
+    fn evaluate_tokens_with_projection(
+        &self,
+        session: &mut Self::Session,
+        token_ids: &[u32],
+        logits: &mut [f32],
+        project_logits: bool,
+    ) -> Result<(), Self::Error> {
+        self.evaluate_grouped(session, token_ids, logits, project_logits)
+    }
+
+    fn evaluate_speculative_tokens(
+        &self,
+        session: &mut Self::Session,
+        token_ids: &[u32],
+        logits: &mut [f32],
+    ) -> Option<Result<(), Self::Error>> {
+        Some(self.evaluate_speculative_grouped(session, token_ids, logits))
+    }
+
+    fn rewind_speculative(
+        &self,
+        session: &mut Self::Session,
+        position: usize,
+    ) -> Option<Result<(), Self::Error>> {
+        Some(session.rollback_to(position))
     }
 }
 
@@ -738,11 +1395,17 @@ pub struct Hy3ScalarSession {
     cache: PagedKvCache,
     dense_scratch: Hy3BlockScratch,
     moe_scratch: Option<Hy3BlockScratch>,
+    batch_dense_scratch: Vec<Hy3BlockScratch>,
+    batch_moe_scratch: Vec<Hy3BlockScratch>,
     hidden: Vec<f32>,
+    batch_hidden: Vec<f32>,
     final_normalized: Vec<f32>,
     decoded_block: Vec<f32>,
     q8: Vec<u8>,
-    expert_leases: Vec<CacheLease<ExpertKey>>,
+    expert_leases: Vec<Option<CacheLease<ExpertKey>>>,
+    expert_needed: Vec<bool>,
+    routes: Vec<bridge_model_hy3::RoutedExpert>,
+    batch_routes: Vec<Vec<bridge_model_hy3::RoutedExpert>>,
     position: usize,
 }
 
@@ -757,13 +1420,108 @@ impl Hy3ScalarSession {
         if let Some(scratch) = &mut self.moe_scratch {
             scratch.reset();
         }
-        self.expert_leases.clear();
+        for scratch in &mut self.batch_dense_scratch {
+            scratch.reset();
+        }
+        for scratch in &mut self.batch_moe_scratch {
+            scratch.reset();
+        }
+        for lease in &mut self.expert_leases {
+            *lease = None;
+        }
+        self.expert_needed.fill(false);
+        self.routes.clear();
+        for routes in &mut self.batch_routes {
+            routes.clear();
+        }
         self.hidden.fill(0.0);
+        self.batch_hidden.fill(0.0);
         self.final_normalized.fill(0.0);
         self.decoded_block.fill(0.0);
         self.q8.fill(0);
         self.position = committed_position;
         Ok(())
+    }
+}
+
+fn rollback_after_error(
+    session: &mut Hy3ScalarSession,
+    committed_position: usize,
+    error: &Hy3ScalarError,
+) -> Result<(), Hy3ScalarError> {
+    session
+        .rollback_to(committed_position)
+        .map_err(|rollback| Hy3ScalarError::SessionRollback {
+            original: error.to_string(),
+            rollback: rollback.to_string(),
+        })
+}
+
+fn grouped_position(values: &[f32], position: usize, width: usize) -> Result<&[f32], Hy3ScalarError> {
+    let start = position
+        .checked_mul(width)
+        .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+    let end = start
+        .checked_add(width)
+        .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+    values
+        .get(start..end)
+        .ok_or(Hy3ScalarError::GroupedScratchMissing {
+            kind: "hidden state",
+            position,
+        })
+}
+
+fn grouped_position_mut(
+    values: &mut [f32],
+    position: usize,
+    width: usize,
+) -> Result<&mut [f32], Hy3ScalarError> {
+    let start = position
+        .checked_mul(width)
+        .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+    let end = start
+        .checked_add(width)
+        .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+    values
+        .get_mut(start..end)
+        .ok_or(Hy3ScalarError::GroupedScratchMissing {
+            kind: "hidden state",
+            position,
+        })
+}
+
+fn grouped_dense_scratch_mut<'a>(
+    primary: &'a mut Hy3BlockScratch,
+    extra: &'a mut [Hy3BlockScratch],
+    position: usize,
+) -> Result<&'a mut Hy3BlockScratch, Hy3ScalarError> {
+    if position == 0 {
+        Ok(primary)
+    } else {
+        extra
+            .get_mut(position - 1)
+            .ok_or(Hy3ScalarError::GroupedScratchMissing {
+                kind: "dense block",
+                position,
+            })
+    }
+}
+
+fn grouped_moe_scratch_mut<'a>(
+    primary: &'a mut Option<Hy3BlockScratch>,
+    extra: &'a mut [Hy3BlockScratch],
+    position: usize,
+) -> Result<&'a mut Hy3BlockScratch, Hy3ScalarError> {
+    if position == 0 {
+        primary.as_mut().ok_or(Hy3ScalarError::MissingMoeScratch)
+    } else {
+        extra
+            .get_mut(position - 1)
+            .ok_or(Hy3ScalarError::GroupedScratchMissing {
+                kind: "MoE block",
+                position,
+            })
     }
 }
 
@@ -1037,30 +1795,105 @@ impl ExpertSource {
         }
     }
 
-    fn read_tight(&self, key: ExpertKey, layout: &ExpertPayloadLayout) -> Result<Vec<u8>, ExpertReadError> {
-        let cancellation = ReadCancellation::new();
-        let mut output = Vec::new();
+    fn read_tight_into(
+        &self,
+        key: ExpertKey,
+        layout: &ExpertPayloadLayout,
+        output: &mut [u8],
+        cancellation: &ReadCancellation,
+    ) -> Result<(), ExpertReadError> {
         let expected = layout
             .total_bytes()
             .map_err(|_| ExpertReadError::ArithmeticOverflow)?;
-        output
-            .try_reserve_exact(expected)
-            .map_err(|_| ExpertReadError::AllocationFailed { requested: expected })?;
+        if output.len() != expected {
+            return Err(ExpertReadError::PayloadLength {
+                expected,
+                actual: output.len(),
+            });
+        }
         match self {
             Self::Direct(store) => {
-                let bytes = store.read_expert(key, &cancellation)?;
-                append_checked(&mut output, &bytes.gate, layout.gate.bytes, "gate")?;
-                append_checked(&mut output, &bytes.up, layout.up.bytes, "up")?;
-                append_checked(&mut output, &bytes.down, layout.down.bytes, "down")?;
+                let record = store
+                    .index()
+                    .get(key)
+                    .ok_or(bridge_prepare::PrepareError::MissingExpert(key))?;
+                validate_segment_length(record.gate.length(), layout.gate.bytes, "gate")?;
+                validate_segment_length(record.up.length(), layout.up.bytes, "up")?;
+                validate_segment_length(record.down.length(), layout.down.bytes, "down")?;
+                store.read_expert_into(key, output, cancellation)?;
             }
             Self::Sidecar(sidecar) => {
-                let bytes = sidecar.read_expert(key, &cancellation)?;
-                append_checked(&mut output, bytes.gate(), layout.gate.bytes, "gate")?;
-                append_checked(&mut output, bytes.up(), layout.up.bytes, "up")?;
-                append_checked(&mut output, bytes.down(), layout.down.bytes, "down")?;
+                let record = sidecar
+                    .manifest()
+                    .record(key)
+                    .ok_or(bridge_format::SidecarError::MissingExpert(key))?;
+                validate_segment_length(record.gate.length, layout.gate.bytes, "gate")?;
+                validate_segment_length(record.up.length, layout.up.bytes, "up")?;
+                validate_segment_length(record.down.length, layout.down.bytes, "down")?;
+                sidecar.read_expert_into(key, output, cancellation)?;
             }
         }
-        Ok(output)
+        Ok(())
+    }
+}
+
+fn build_expert_read_slots(
+    layers: &[LayerWeights],
+    config: &Hy3Config,
+    cache_bytes: usize,
+) -> Result<Option<ReadSlotPool>, Hy3ScalarError> {
+    let mut expert_sizes = Vec::new();
+    for layer in layers {
+        let FeedForwardWeights::Moe(moe) = &layer.feed_forward else {
+            continue;
+        };
+        expert_sizes.push(moe.expert_layout.total_bytes()?);
+    }
+    let Some((slot_count, slot_bytes)) =
+        expert_slot_plan(&expert_sizes, config.expert_count as usize, cache_bytes)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(ReadSlotPool::new(slot_count, slot_bytes, 4_096)?))
+}
+
+fn expert_slot_plan(
+    expert_sizes: &[usize],
+    experts_per_layer: usize,
+    cache_bytes: usize,
+) -> Result<Option<(usize, usize)>, Hy3ScalarError> {
+    let Some(&slot_bytes) = expert_sizes.iter().max() else {
+        return Ok(None);
+    };
+    let all_experts = expert_sizes
+        .len()
+        .checked_mul(experts_per_layer)
+        .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+    let slot_count = (cache_bytes / slot_bytes).min(all_experts).max(1);
+    Ok(Some((slot_count, slot_bytes)))
+}
+
+#[cfg(test)]
+mod expert_slot_tests {
+    use super::expert_slot_plan;
+
+    #[test]
+    fn heterogeneous_layer_records_share_slots_sized_for_the_largest_layout() {
+        let smaller = 6_045_696;
+        let larger = 6_733_824;
+        let cache_bytes = 512 * 1024 * 1024;
+        let (slot_count, slot_bytes) = expert_slot_plan(&[smaller, larger], 192, cache_bytes)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(slot_bytes, larger);
+        assert_eq!(slot_count, cache_bytes / larger);
+        assert!(slot_count < 2 * 192);
+    }
+
+    #[test]
+    fn model_without_moe_layers_needs_no_expert_slots() {
+        assert_eq!(expert_slot_plan(&[], 192, 1024).unwrap(), None);
     }
 }
 
@@ -1195,6 +2028,20 @@ fn validate_options(model: &ValidatedHy3Model, options: &Hy3ScalarOptions) -> Re
     if options.kv_page_tokens == 0 {
         return Err(Hy3ScalarError::ZeroKvPageTokens);
     }
+    if !matches!(options.prefill_chunk, 1 | 2 | 4 | 8) {
+        return Err(Hy3ScalarError::InvalidPrefillChunk(options.prefill_chunk));
+    }
+    if let Some(t) = options.speculative_ngram_t {
+        if t != 2 {
+            return Err(Hy3ScalarError::InvalidSpeculativeWidth(t));
+        }
+        if options.prefill_chunk < t {
+            return Err(Hy3ScalarError::SpeculationRequiresGroupedPrefill {
+                speculative_width: t,
+                prefill_chunk: options.prefill_chunk,
+            });
+        }
+    }
     CacheConfig {
         capacity_bytes: options.expert_cache_bytes,
         admit_after_requests: options.cache_admit_after_requests,
@@ -1209,6 +2056,20 @@ fn validate_options(model: &ValidatedHy3Model, options: &Hy3ScalarOptions) -> Re
         if options.expert_cache_bytes < maximum_expert {
             return Err(Hy3ScalarError::ExpertCacheTooSmall {
                 minimum: maximum_expert,
+                actual: options.expert_cache_bytes,
+            });
+        }
+        let union_experts = (model.config().expert_used_count as usize)
+            .checked_mul(options.prefill_chunk)
+            .ok_or(Hy3ScalarError::ArithmeticOverflow)?
+            .min(model.config().expert_count as usize);
+        let grouped_minimum = maximum_expert
+            .checked_mul(union_experts)
+            .ok_or(Hy3ScalarError::ArithmeticOverflow)?;
+        if options.expert_cache_bytes < grouped_minimum {
+            return Err(Hy3ScalarError::GroupedExpertCacheTooSmall {
+                chunk: options.prefill_chunk,
+                minimum: grouped_minimum,
                 actual: options.expert_cache_bytes,
             });
         }
@@ -1302,20 +2163,19 @@ fn matrix_layout(tensor: &Hy3Tensor, expert_count: u32) -> Result<MatrixLayout, 
     })
 }
 
-fn append_checked(
-    output: &mut Vec<u8>,
-    bytes: &[u8],
+fn validate_segment_length(
+    actual: u64,
     expected: usize,
     segment: &'static str,
 ) -> Result<(), ExpertReadError> {
-    if bytes.len() != expected {
+    let actual = usize::try_from(actual).map_err(|_| ExpertReadError::ArithmeticOverflow)?;
+    if actual != expected {
         return Err(ExpertReadError::SegmentLength {
             segment,
             expected,
-            actual: bytes.len(),
+            actual,
         });
     }
-    output.extend_from_slice(bytes);
     Ok(())
 }
 
@@ -1348,8 +2208,10 @@ pub enum ExpertReadError {
     },
     #[error("checked arithmetic overflow while loading an expert")]
     ArithmeticOverflow,
-    #[error("allocation failed while reserving {requested} expert bytes")]
-    AllocationFailed { requested: usize },
+    #[error("expert output buffer is {actual} bytes, expected {expected}")]
+    PayloadLength { expected: usize, actual: usize },
+    #[error(transparent)]
+    ReadSlot(#[from] SlotPoolError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1365,6 +2227,8 @@ pub enum Hy3ScalarError {
     #[error(transparent)]
     Cpu(#[from] bridge_kernels_cpu::CpuBackendError),
     #[error(transparent)]
+    Cuda(#[from] bridge_kernels_cuda::CudaRuntimeError),
+    #[error(transparent)]
     Kv(#[from] bridge_kv_gqa::KvError),
     #[error(transparent)]
     Quant(#[from] bridge_quant_layout::QuantError),
@@ -1376,6 +2240,8 @@ pub enum Hy3ScalarError {
     Cache(#[from] bridge_cache::CacheError),
     #[error(transparent)]
     CacheHeat(#[from] bridge_cache::HeatError),
+    #[error(transparent)]
+    ReadSlot(#[from] SlotPoolError),
     #[error("expert cache load failed: {0}")]
     ExpertCache(#[source] LoadError<ExpertReadError>),
     #[error("selected model has {actual} shards, expected exactly one")]
@@ -1438,14 +2304,56 @@ pub enum Hy3ScalarError {
     InvalidContextCapacity { maximum: u64, actual: usize },
     #[error("KV page token count must be non-zero")]
     ZeroKvPageTokens,
+    #[error("prefill chunk is {0}; expected 1, 2, 4, or 8")]
+    InvalidPrefillChunk(usize),
+    #[error("speculative width is {0}; only T=2 is supported")]
+    InvalidSpeculativeWidth(usize),
+    #[error(
+        "T={speculative_width} speculation requires grouped prefill at least that wide, but \
+         prefill chunk is {prefill_chunk}"
+    )]
+    SpeculationRequiresGroupedPrefill {
+        speculative_width: usize,
+        prefill_chunk: usize,
+    },
+    #[error("grouped token count is {actual}; expected 1..={maximum}")]
+    GroupedTokenCount { actual: usize, maximum: usize },
+    #[error(
+        "speculative logits have {actual} values for {tokens} tokens and vocabulary \
+         {vocabulary_size}"
+    )]
+    SpeculativeLogitShape {
+        tokens: usize,
+        vocabulary_size: usize,
+        actual: usize,
+    },
+    #[error("grouped {kind} scratch is missing for position {position}")]
+    GroupedScratchMissing { kind: &'static str, position: usize },
     #[error("expert cache is {actual} bytes, expected at least one complete expert ({minimum} bytes)")]
     ExpertCacheTooSmall { minimum: usize, actual: usize },
+    #[error(
+        "prefill chunk {chunk} needs at least {minimum} expert-cache bytes for its worst-case \
+         route union, but only {actual} are configured"
+    )]
+    GroupedExpertCacheTooSmall {
+        chunk: usize,
+        minimum: usize,
+        actual: usize,
+    },
     #[error("model contains no dense layer zero")]
     MissingDenseLayer,
     #[error("MoE execution has no scratch workspace")]
     MissingMoeScratch,
     #[error("MoE execution has no expert source")]
     MissingExpertSource,
+    #[error("MoE execution has no aligned expert read-slot pool")]
+    MissingExpertReadSlots,
+    #[error("selected expert lease was not populated")]
+    MissingExpertLease,
+    #[error("selected expert ID {expert_id} is outside expert count {expert_count}")]
+    SelectedExpertId { expert_id: u32, expert_count: usize },
+    #[error("selected expert count is {actual}, maximum supported without allocation is {maximum}")]
+    SelectedExpertCount { actual: usize, maximum: usize },
     #[error("sidecar tensor-directory hash is {actual}, expected {expected}")]
     SidecarDirectoryHash { expected: String, actual: String },
     #[error("expert payload is {actual} bytes, expected {expected}")]
@@ -1471,6 +2379,13 @@ pub enum Hy3ScalarError {
     },
     #[error("token evaluation failed ({original}) and session rollback also failed ({rollback})")]
     SessionRollback { original: String, rollback: String },
+    #[error("CUDA token execution failed ({cuda}) and the authoritative CPU retry also failed ({cpu})")]
+    CudaFallbackFailed { cuda: String, cpu: String },
+    #[error(
+        "CUDA reusable packed qualification did not pass: bit_exact={bit_exact}, \
+         deterministic={deterministic}"
+    )]
+    CudaQualification { bit_exact: bool, deterministic: bool },
     #[error("KV layer {layer} stores {actual} tokens, expected committed position {expected}")]
     InconsistentKvLength {
         layer: usize,
@@ -1479,6 +2394,11 @@ pub enum Hy3ScalarError {
     },
     #[error("checked arithmetic overflow in Hy3 scalar runtime")]
     ArithmeticOverflow,
+    #[error("backend {backend} is unavailable: {reason}")]
+    BackendUnavailable {
+        backend: &'static str,
+        reason: &'static str,
+    },
     #[error("allocation failed while reserving {requested} entries for {context}")]
     AllocationFailed { context: &'static str, requested: usize },
 }

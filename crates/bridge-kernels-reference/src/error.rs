@@ -50,6 +50,8 @@ pub enum KernelError {
     AllocationFailed { context: &'static str, requested: usize },
     #[error("Hy3 routing failed: {message}")]
     Routing { message: String },
+    #[error("CUDA packed execution failed: {message}")]
+    Cuda { message: String },
     #[error("position {position} is outside configured context length {context_length}")]
     PositionOutOfRange { position: u64, context_length: u64 },
     #[error(transparent)]

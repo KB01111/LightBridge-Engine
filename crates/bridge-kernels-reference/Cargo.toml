@@ -9,6 +9,7 @@ description = "Allocation-explicit scalar reference kernels for LightBridge."
 
 [dependencies]
 bridge-core.workspace = true
+bridge-kernels-cuda.workspace = true
 bridge-model-hy3.workspace = true
 bridge-quant-layout.workspace = true
 bridge-kv-gqa.workspace = true

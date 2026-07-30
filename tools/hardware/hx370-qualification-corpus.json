@@ -1,0 +1,8 @@
+{
+  "format": "lightbridge-benchmark-corpus",
+  "version": 1,
+  "prompts": [
+    "Hello",
+    "Explain why the sky is blue in one sentence."
+  ]
+}

@@ -5,6 +5,7 @@ use std::sync::{
 };
 
 use bridge_cache::{CacheConfig, CacheError, CompressedCache, LoadError};
+use bridge_io_windows::ReadSlotPool;
 
 fn cache(capacity_bytes: usize, admit_after_requests: u64) -> CompressedCache<u32> {
     CompressedCache::new(CacheConfig {
@@ -173,4 +174,61 @@ fn heat_round_trips_with_input_bounds() {
             .unwrap(),
     );
     assert_eq!(destination.stats().unwrap().resident_entries, 1);
+}
+
+#[test]
+fn aligned_read_slot_is_retained_by_leases_and_recycled_after_eviction() {
+    let cache = cache(64, 1);
+    let slots = ReadSlotPool::new(1, 64, 64).unwrap();
+    let mut original = None;
+    let lease = cache
+        .get_or_try_insert_read_slot(9, 16, || {
+            let mut slot = slots.try_acquire().unwrap().unwrap();
+            original = Some(slot.token());
+            slot.as_mut_slice()[..16].fill(9);
+            Ok::<_, io::Error>(slot)
+        })
+        .unwrap();
+    assert_eq!(lease.bytes(), &[9; 16]);
+    assert!(slots.try_acquire().unwrap().is_none());
+    drop(lease);
+    assert!(slots.try_acquire().unwrap().is_none());
+
+    assert_eq!(cache.clear_unpinned().unwrap(), 1);
+    let recycled = slots.try_acquire().unwrap().unwrap();
+    assert_ne!(Some(recycled.token()), original);
+    assert!(recycled.as_slice().iter().all(|&byte| byte == 0xdd));
+}
+
+#[test]
+fn charged_slots_evict_before_the_physical_pool_can_be_exhausted() {
+    let cache = cache(16, 1);
+    let slots = ReadSlotPool::new(2, 8, 8).unwrap();
+    for key in [1_u32, 2] {
+        let lease = cache
+            .get_or_try_insert_read_slot_charged(key, 4, 8, || {
+                let mut slot = slots.try_acquire().unwrap().unwrap();
+                slot.as_mut_slice()[..4].fill(key as u8);
+                Ok::<_, io::Error>(slot)
+            })
+            .unwrap();
+        assert_eq!(lease.bytes(), &[key as u8; 4]);
+    }
+    assert!(slots.try_acquire().unwrap().is_none());
+
+    let third = cache
+        .get_or_try_insert_read_slot_charged(3, 4, 8, || {
+            let mut slot = slots.try_acquire().unwrap().unwrap();
+            slot.as_mut_slice()[..4].fill(3);
+            Ok::<_, io::Error>(slot)
+        })
+        .unwrap();
+    assert_eq!(third.bytes(), &[3; 4]);
+    drop(third);
+
+    let stats = cache.stats().unwrap();
+    assert_eq!(stats.used_bytes, 16);
+    assert_eq!(stats.resident_entries, 2);
+    assert_eq!(stats.evictions, 1);
+    assert!(slots.try_acquire().unwrap().is_none());
 }

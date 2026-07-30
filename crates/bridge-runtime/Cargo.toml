@@ -15,6 +15,7 @@ bridge-gguf.workspace = true
 bridge-gguf-split.workspace = true
 bridge-io-windows.workspace = true
 bridge-kernels-cpu.workspace = true
+bridge-kernels-cuda.workspace = true
 bridge-kernels-reference.workspace = true
 bridge-kv-gqa.workspace = true
 bridge-model-hy3.workspace = true

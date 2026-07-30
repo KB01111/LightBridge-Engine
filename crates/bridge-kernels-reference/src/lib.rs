@@ -15,8 +15,9 @@ pub use activation::{expert_swiglu_accumulate_into, swiglu_project_into, SwiGluE
 pub use attention::{causal_gqa_attention_into, AttentionInput, AttentionScratch};
 pub use error::KernelError;
 pub use gemv::{
-    gemv_accumulate_scaled_into, gemv_cpu_parallel_q8k_into, gemv_dequant_f32_into, gemv_into,
-    gemv_llama_q8k_into, required_q8_k_bytes, ReferenceExecutionMode,
+    gemv_accumulate_scaled_into, gemv_cpu_parallel_avx512_vnni_into, gemv_cpu_parallel_avx_vnni_into,
+    gemv_cpu_parallel_q8k_into, gemv_cuda_q8k_into, gemv_dequant_f32_into, gemv_into, gemv_llama_q8k_into,
+    gemv_pair_into, gemv_triplet_into, required_q8_k_bytes, ReferenceExecutionMode,
 };
 pub use layer::{
     hy3_block_forward_token, hy3_moe_finish_token, hy3_moe_route_token, Hy3AttentionWeights,

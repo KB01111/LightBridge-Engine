@@ -15,12 +15,21 @@ retained upstream file to the exact Git commit blob bytes.
 | Tencent Hy3 | final head `a960ebc3da325ba167f069f76c41eb62c9280d22` | Apache-2.0 | Official final-model architecture and tokenizer lineage |
 | Transformers | v5.6.0 commit `3e80155a968c1080f11b2710e8b31741ac5ab0ed` | Apache-2.0 | Independent model/configuration behavior reference |
 | Colibri | v1.1.1 commit `81f08a09e5651ce52616dc720f68810f9021c0be` | Apache-2.0 | Systems-design reference only |
+| Deltafin | `main` optimization design reviewed 2026-07-29 | MIT | Concept-only systems-design reference for byte/copy/allocation reduction, leases, and capability gates |
 
 llama.cpp's MIT terms require preservation of its copyright and permission
 notices when material is copied or derived. Future changes that copy or adapt
 upstream implementation material must retain the applicable notices and
 record the affected files here. This document does not reproduce upstream
 license text.
+
+Deltafin's `OPTIMIZATIONS.md` informed the acceleration design at a conceptual
+level. No Deltafin Python, C, Objective-C++, Metal, tests, or implementation
+text was copied or adapted. LightBridge's Rust ownership, IOCP, cache, packed
+dot, tuning-profile, and backend-gating implementations were written against
+the existing LightBridge APIs and platform documentation. If substantial
+Deltafin source is adapted later, its 2026 GAVAMEDIA Corporation MIT notice
+must be preserved with the affected files and recorded here.
 
 ## Complete authenticated llama.cpp inventory
 
