@@ -131,6 +131,27 @@ impl DirectExpertStore {
         &self.index
     }
 
+    /// Reads the gate, up, and down data for an expert, preserving each segment's GGML type.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PrepareError::MissingExpert`] if the key is absent from the index, or a
+    /// read error if any source segment cannot be read.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # fn example(
+    /// #     store: &DirectExpertStore,
+    /// #     key: ExpertKey,
+    /// #     cancellation: &ReadCancellation,
+    /// # ) -> Result<(), PrepareError> {
+    /// let expert = store.read_expert(key, cancellation)?;
+    /// assert_eq!(expert.gate.len() + expert.up.len() + expert.down.len(),
+    ///            expert.gate.len() + expert.up.len() + expert.down.len());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn read_expert(
         &self,
         key: ExpertKey,
@@ -147,7 +168,19 @@ impl DirectExpertStore {
         })
     }
 
-    /// Reads the source slabs directly into a tight gate/up/down destination.
+    /// Reads an expert's gate, up, and down source slabs into one contiguous destination buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the expert is missing, the destination length does not match the
+    /// combined slab lengths, or reading any source slab fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// store.read_expert_into(key, &mut output, &cancellation)?;
+    /// # Ok::<(), PrepareError>(())
+    /// ```
     pub fn read_expert_into(
         &self,
         key: ExpertKey,
@@ -177,6 +210,19 @@ impl DirectExpertStore {
         Ok(())
     }
 
+    /// Reads the bytes occupied by a source segment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the segment's shard index is unavailable or the read fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let bytes = store.read_segment(&segment, &cancellation)?;
+    /// assert_eq!(bytes.len(), segment.length() as usize);
+    /// # Ok::<(), PrepareError>(())
+    /// ```
     fn read_segment(
         &self,
         segment: &SourceSegment,
@@ -189,6 +235,18 @@ impl DirectExpertStore {
         Ok(reader.read_exact_at(segment.range.clone(), cancellation)?)
     }
 
+    /// Reads a source segment into the provided output buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the segment's shard index is out of range or the read fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// store.read_segment_into(&segment, &mut output, &cancellation)?;
+    /// # Ok::<(), PrepareError>(())
+    /// ```
     fn read_segment_into(
         &self,
         segment: &SourceSegment,

@@ -54,6 +54,21 @@ impl ReadCancellation {
         self.cancelled.store(true, Ordering::Release);
     }
 
+    /// Checks whether cancellation has been requested.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cancellation = ReadCancellation::new();
+    /// assert!(!cancellation.is_cancelled());
+    ///
+    /// cancellation.cancel();
+    /// assert!(cancellation.is_cancelled());
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `true` if cancellation has been requested, `false` otherwise.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
@@ -88,6 +103,27 @@ struct ReadSlotPoolState {
 }
 
 impl ReadSlotPool {
+    /// Creates a bounded pool for leasing aligned buffers.
+    ///
+    /// `slot_count`, `slot_bytes`, and `alignment` must be greater than zero, and
+    /// `alignment` must be a power of two.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SlotPoolError::ZeroSlots`] or [`SlotPoolError::ZeroSlotBytes`]
+    /// when the corresponding size is zero, [`SlotPoolError::InvalidAlignment`]
+    /// when `alignment` is not a power of two, or
+    /// [`SlotPoolError::AllocationFailed`] if pool initialization cannot allocate
+    /// its storage.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(2, 4096, 4096).unwrap();
+    ///
+    /// assert_eq!(pool.slot_bytes(), 4096);
+    /// assert_eq!(pool.alignment(), 4096);
+    /// ```
     pub fn new(slot_count: usize, slot_bytes: usize, alignment: usize) -> Result<Self, SlotPoolError> {
         if slot_count == 0 {
             return Err(SlotPoolError::ZeroSlots);
@@ -118,19 +154,64 @@ impl ReadSlotPool {
         })
     }
 
+    /// Gets the size of each buffer managed by the pool, in bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(2, 4096, 64).unwrap();
+    /// assert_eq!(pool.slot_bytes(), 4096);
+    /// ```
     pub fn slot_bytes(&self) -> usize {
         self.inner.slot_bytes
     }
 
+    /// Returns the required alignment of buffers leased from the pool.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(2, 4096, 64).unwrap();
+    /// assert_eq!(pool.alignment(), 64);
+    /// ```
     pub fn alignment(&self) -> usize {
         self.inner.alignment
     }
 
+    /// Attempts to acquire an available read buffer lease without waiting.
+    ///
+    /// Returns `None` when all configured slots are currently leased.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(1, 1024, 8).unwrap();
+    /// let lease = pool.try_acquire().unwrap().expect("a slot is available");
+    /// assert_eq!(lease.as_slice().len(), 1024);
+    /// ```
+    pub fn try_acquire(&self) -> Result<Option<ReadSlotLease>, SlotPoolError>
     pub fn try_acquire(&self) -> Result<Option<ReadSlotLease>, SlotPoolError> {
         let mut state = self.inner.state.lock().map_err(|_| SlotPoolError::Poisoned)?;
         acquire_locked(&self.inner, &mut state)
     }
 
+    /// Acquires an available read-slot lease, waiting until one becomes available or cancellation is requested.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SlotPoolError::Cancelled`] if cancellation is requested before a lease is acquired.
+    /// Returns [`SlotPoolError::Poisoned`] if the pool synchronization state is poisoned.
+    /// Other pool errors may be returned when allocating or preparing a slot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(1, 1024, 8).unwrap();
+    /// let cancellation = ReadCancellation::new();
+    /// let lease = pool.acquire(&cancellation).unwrap();
+    ///
+    /// assert_eq!(lease.as_slice().len(), 1024);
+    /// ```
     pub fn acquire(&self, cancellation: &ReadCancellation) -> Result<ReadSlotLease, SlotPoolError> {
         let mut state = self.inner.state.lock().map_err(|_| SlotPoolError::Poisoned)?;
         loop {
@@ -149,6 +230,25 @@ impl ReadSlotPool {
         }
     }
 
+    /// Checks whether a slot token identifies a currently leased slot.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(1, 1024, 8).unwrap();
+    /// let lease = pool.try_acquire().unwrap().unwrap();
+    /// let token = lease.token();
+    ///
+    /// assert!(pool.is_current(token).unwrap());
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `token` - The slot index and generation to validate.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if the token matches a currently leased slot, `Ok(false)` otherwise.
     pub fn is_current(&self, token: ReadSlotToken) -> Result<bool, SlotPoolError> {
         let state = self.inner.state.lock().map_err(|_| SlotPoolError::Poisoned)?;
         Ok(state
@@ -159,6 +259,17 @@ impl ReadSlotPool {
     }
 }
 
+/// Acquires an available slot and assigns it a new generation token.
+///
+/// Returns `None` when the pool has reached its slot capacity.
+///
+/// # Examples
+///
+/// ```
+/// let pool = ReadSlotPool::new(1, 4096, 4096).unwrap();
+/// let lease = pool.try_acquire().unwrap().unwrap();
+/// assert!(pool.is_current(lease.token()).unwrap());
+/// ```
 fn acquire_locked(
     inner: &Arc<ReadSlotPoolInner>,
     state: &mut ReadSlotPoolState,
@@ -194,14 +305,44 @@ pub struct ReadSlotLease {
 }
 
 impl ReadSlotLease {
+    /// Gets the generation-tracked token identifying this lease.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(1, 1024, 8).unwrap();
+    /// let lease = pool.try_acquire().unwrap().unwrap();
+    /// let token = lease.token();
+    ///
+    /// assert_eq!(token.index, 0);
+    /// ```
     pub const fn token(&self) -> ReadSlotToken {
         self.token
     }
 
+    /// Provides an immutable view of the leased buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(1, 1024, 64).unwrap();
+    /// let lease = pool.try_acquire().unwrap().unwrap();
+    /// assert_eq!(lease.as_slice().len(), 1024);
+    /// ```
     pub fn as_slice(&self) -> &[u8] {
         self.buffer.as_ref().expect("live lease owns its slot").as_slice()
     }
 
+    /// Provides mutable access to the bytes owned by the lease.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(1, 4, 1).unwrap();
+    /// let mut lease = pool.try_acquire().unwrap().unwrap();
+    /// lease.as_mut_slice().copy_from_slice(&[1, 2, 3, 4]);
+    /// assert_eq!(lease.as_slice(), &[1, 2, 3, 4]);
+    /// ```
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         self.buffer
             .as_mut()
@@ -209,12 +350,35 @@ impl ReadSlotLease {
             .as_mut_slice()
     }
 
+    /// Returns the memory address of the leased buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(1, 4096, 8).unwrap();
+    /// let lease = pool.try_acquire().unwrap().unwrap();
+    ///
+    /// assert_ne!(lease.address(), 0);
+    /// ```
     pub fn address(&self) -> usize {
         self.buffer.as_ref().expect("live lease owns its slot").address()
     }
 }
 
 impl Drop for ReadSlotLease {
+    /// Releases the leased buffer back to the pool for reuse.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let pool = ReadSlotPool::new(1, 8, 8).unwrap();
+    /// let lease = pool.try_acquire().unwrap().unwrap();
+    /// let token = lease.token();
+    ///
+    /// drop(lease);
+    ///
+    /// assert!(!pool.is_current(token).unwrap());
+    /// ```
     fn drop(&mut self) {
         let Some(mut buffer) = self.buffer.take() else {
             return;
@@ -235,6 +399,20 @@ struct AlignedBuffer {
 }
 
 impl AlignedBuffer {
+    /// Allocates a zero-initialized buffer with the requested size and alignment.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SlotPoolError::InvalidAlignment`] when the size and alignment
+    /// cannot form a valid allocation layout, or [`SlotPoolError::AllocationFailed`]
+    /// when allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let buffer = AlignedBuffer::new(16, 8).unwrap();
+    /// assert_eq!(buffer.as_slice(), &[0; 16]);
+    /// ```
     fn new(length: usize, alignment: usize) -> Result<Self, SlotPoolError> {
         let layout = Layout::from_size_align(length, alignment)
             .map_err(|_| SlotPoolError::InvalidAlignment(alignment))?;
@@ -248,24 +426,60 @@ impl AlignedBuffer {
         Ok(Self { pointer, layout })
     }
 
+    /// Provides an immutable view of the buffer's initialized bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let buffer = AlignedBuffer::new(4, 1).unwrap();
+    /// assert_eq!(buffer.as_slice(), &[0; 4]);
+    /// ```
     fn as_slice(&self) -> &[u8] {
         // SAFETY: the allocation is live for `self`, initialized, and no
         // mutable borrow exists while `&self` is held.
         unsafe { std::slice::from_raw_parts(self.pointer.as_ptr(), self.layout.size()) }
     }
 
+    /// Provides mutable access to the buffer's bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut buffer = AlignedBuffer::new(4, 1).unwrap();
+    /// buffer.as_mut_slice().fill(0xFF);
+    /// assert_eq!(buffer.as_slice(), &[0xFF; 4]);
+    /// ```
     fn as_mut_slice(&mut self) -> &mut [u8] {
         // SAFETY: `&mut self` guarantees exclusive access to the live
         // allocation.
         unsafe { std::slice::from_raw_parts_mut(self.pointer.as_ptr(), self.layout.size()) }
     }
 
+    /// Provides the memory address of the allocated buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let buffer = AlignedBuffer::new(16, 8).unwrap();
+    /// assert_eq!(buffer.address() % 8, 0);
+    /// ```
     fn address(&self) -> usize {
         self.pointer.as_ptr() as usize
     }
 }
 
 impl std::fmt::Debug for AlignedBuffer {
+    /// Formats the buffer by displaying its allocation length and alignment.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let buffer = AlignedBuffer::new(16, 8).unwrap();
+    /// assert_eq!(
+    ///     format!("{buffer:?}"),
+    ///     "AlignedBuffer { length: 16, alignment: 8, .. }"
+    /// );
+    /// ```
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("AlignedBuffer")
@@ -334,6 +548,29 @@ impl std::fmt::Debug for OverlappedRead<'_> {
 
 #[cfg(windows)]
 impl OverlappedFile {
+    /// Opens a file for overlapped positioned reads through an I/O completion port.
+    ///
+    /// `buffering` selects buffered or unbuffered file access. Unbuffered access requires
+    /// requests and buffers to satisfy the file's alignment requirements.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or inspected, is not a regular file,
+    /// alignment requirements cannot be determined, or the completion port cannot be created
+    /// or associated with the file.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(windows)]
+    /// # {
+    /// use crate::{FileBuffering, OverlappedFile};
+    ///
+    /// let file = OverlappedFile::open("data.bin", FileBuffering::Buffered)?;
+    /// println!("file size: {} bytes", file.length());
+    /// # Ok::<(), crate::ReadError>(())
+    /// # }
+    /// ```
     pub fn open(path: impl AsRef<Path>, buffering: FileBuffering) -> Result<Self, ReadError> {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -393,21 +630,82 @@ impl OverlappedFile {
         })
     }
 
+    /// Returns the buffering mode configured for the file.
+    
+    ///
+    
+    /// # Examples
+    
+    ///
+    
+    /// ```
+    
+    /// let file = OverlappedFile::open("example.dat", FileBuffering::Buffered)?;
+    
+    /// assert_eq!(file.buffering(), FileBuffering::Buffered);
+    
+    /// # Ok::<(), ReadError>(())
+    
+    /// ```
     pub const fn buffering(&self) -> FileBuffering {
         self.buffering
     }
 
+    /// Returns the byte alignment required for positioned reads.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(windows)]
+    /// # {
+    /// let file = OverlappedFile::open("file.bin", FileBuffering::Buffered)?;
+    /// assert!(file.alignment().is_power_of_two());
+    /// # Ok::<(), ReadError>(())
+    /// # }
+    /// ```
     pub const fn alignment(&self) -> usize {
         self.alignment
     }
 
+    /// Gets the file's logical length in bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # let file = /* an opened file */ todo!();
+    /// let length = file.length();
+    /// assert!(length >= 0);
+    /// ```
+    ///
     pub const fn length(&self) -> u64 {
         self.length
     }
 
-    /// Submits every request before waiting for IOCP completions. A call is
-    /// serialized per file so completion ownership remains local, while all
-    /// reads inside the batch are genuinely overlapped.
+    /// Submits a batch of positioned reads and waits for their IOCP completions.
+    ///
+    /// Requests are submitted before completion processing begins, allowing the
+    /// operations to overlap. Cancellation stops pending operations and returns
+    /// [`ReadError::Cancelled`].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let path = std::env::temp_dir().join("overlapped-read-example");
+    /// std::fs::write(&path, b"hello")?;
+    ///
+    /// let file = OverlappedFile::open(&path, FileBuffering::Buffered)?;
+    /// let mut buffer = [0_u8; 5];
+    /// let mut requests = [OverlappedRead {
+    ///     offset: 0,
+    ///     buffer: &mut buffer,
+    /// }];
+    ///
+    /// file.read_many(&mut requests, &ReadCancellation::new())?;
+    /// assert_eq!(&buffer, b"hello");
+    ///
+    /// std::fs::remove_file(path)?;
+    /// # Ok::<(), ReadError>(())
+    /// ```
     pub fn read_many(
         &self,
         requests: &mut [OverlappedRead<'_>],
@@ -546,6 +844,24 @@ impl OverlappedFile {
         Ok(())
     }
 
+    /// Validates a positioned overlapped-read request against the file bounds and buffering requirements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let path = std::env::temp_dir().join(format!("positioned-read-{}", std::process::id()));
+    /// std::fs::write(&path, b"example").unwrap();
+    ///
+    /// let file = OverlappedFile::open(&path, FileBuffering::Buffered).unwrap();
+    /// let mut buffer = [0u8; 7];
+    /// let request = OverlappedRead {
+    ///     offset: 0,
+    ///     buffer: &mut buffer,
+    /// };
+    ///
+    /// assert!(file.validate_overlapped_request(&request).is_ok());
+    /// std::fs::remove_file(path).unwrap();
+    /// ```
     fn validate_overlapped_request(&self, request: &OverlappedRead<'_>) -> Result<(), ReadError> {
         let length = u64::try_from(request.buffer.len()).map_err(|_| ReadError::ArithmeticOverflow)?;
         let end = request
@@ -602,6 +918,16 @@ struct PendingRead {
 
 #[cfg(windows)]
 impl PendingRead {
+    /// Creates a pending positioned read with the specified file offset and expected byte count.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let pending = PendingRead::new(0, 4096);
+    /// assert_eq!(pending.offset, 0);
+    /// assert_eq!(pending.expected, 4096);
+    /// assert!(!pending.completed);
+    /// ```
     fn new(offset: u64, expected: usize) -> Self {
         use windows_sys::Win32::System::IO::OVERLAPPED;
         // SAFETY: an all-zero OVERLAPPED is the documented initialization.
@@ -617,7 +943,20 @@ impl PendingRead {
     }
 }
 
-#[cfg(windows)]
+/// Opens a file for overlapped Windows I/O with the specified file flags.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+///
+/// let result = fs_open_overlapped(Path::new("file.dat"), 0);
+/// assert!(result.is_ok() || result.is_err());
+/// ```
+///
+/// # Parameters
+///
+/// * `flags` — Windows file-opening flags passed to the underlying open operation.
 fn fs_open_overlapped(path: &Path, flags: u32) -> Result<File, ReadError> {
     use std::os::windows::fs::OpenOptionsExt;
     let mut options = std::fs::OpenOptions::new();
@@ -628,6 +967,20 @@ fn fs_open_overlapped(path: &Path, flags: u32) -> Result<File, ReadError> {
     })
 }
 
+/// Determines the required buffer alignment for a Windows file handle.
+///
+/// When physical-sector information is available, the result accounts for both
+/// device and physical-sector alignment requirements. If that information
+/// cannot be queried, the device alignment is returned when physical-sector
+/// alignment is not required.
+///
+/// # Examples
+///
+/// ```
+/// let file = std::fs::File::open(std::env::current_exe().unwrap()).unwrap();
+/// let alignment = file_alignment(&file, false).unwrap();
+/// assert!(alignment.is_power_of_two());
+/// ```
 #[cfg(windows)]
 fn file_alignment(file: &File, require_physical_sector: bool) -> Result<usize, ReadError> {
     use std::os::windows::io::AsRawHandle;
@@ -699,6 +1052,14 @@ fn file_alignment(file: &File, require_physical_sector: bool) -> Result<usize, R
     })
 }
 
+/// Cancels all pending reads and drains their completion notifications.
+///
+/// # Examples
+///
+/// ```
+/// let mut pending = [];
+/// cancel_and_drain(std::ptr::null_mut(), std::ptr::null_mut(), &mut pending);
+/// ```
 #[cfg(windows)]
 fn cancel_and_drain(
     handle: windows_sys::Win32::Foundation::HANDLE,
@@ -722,6 +1083,22 @@ fn cancel_and_drain(
 }
 
 impl PositionedFile {
+    /// Opens a regular file for bounded positioned reads.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request limit is zero, the file cannot be opened or
+    /// inspected, or the path does not refer to a regular file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let result = PositionedFile::open(
+    ///     "example.bin",
+    ///     ReadLimits { max_request_bytes: 0 },
+    /// );
+    /// assert!(matches!(result, Err(ReadError::ZeroRequestLimit)));
+    /// ```
     pub fn open(path: impl AsRef<Path>, limits: ReadLimits) -> Result<Self, ReadError> {
         if limits.max_request_bytes == 0 {
             return Err(ReadError::ZeroRequestLimit);

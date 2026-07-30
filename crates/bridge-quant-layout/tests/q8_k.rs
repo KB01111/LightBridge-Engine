@@ -9,6 +9,14 @@ const IQ2: &[u8; 246] = include_bytes!("fixtures/decode-iq2-s.input.bin");
 const IQ3: &[u8; 330] = include_bytes!("fixtures/decode-iq3-s.input.bin");
 const Q8: &[u8; 876] = include_bytes!("fixtures/q8-k-activations.output-q8-k.bin");
 
+/// Generates deterministic sentinel bytes of the requested length.
+///
+/// # Examples
+///
+/// ```
+/// let bytes = sentinel_bytes(4);
+/// assert_eq!(bytes, vec![11, 48, 85, 122]);
+/// ```
 fn sentinel_bytes(len: usize) -> Vec<u8> {
     (0..len)
         .map(|index| (index as u8).wrapping_mul(37).wrapping_add(11))

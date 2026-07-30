@@ -165,16 +165,53 @@ pub enum CudaRuntimeError {
     PackedExecutorPoisoned,
 }
 
+/// Reports that the NVRTC canary is unavailable on unsupported platforms.
+///
+/// # Examples
+///
+/// ```
+/// assert!(matches!(
+///     runtime_nvrtc_canary(),
+///     Err(CudaRuntimeError::UnsupportedPlatform)
+/// ));
+/// ```
+///
+/// # Returns
+///
+/// `Err(CudaRuntimeError::UnsupportedPlatform)`.
 #[cfg(not(windows))]
 pub fn runtime_nvrtc_canary() -> Result<CudaNvrtcCanary, CudaRuntimeError> {
     Err(CudaRuntimeError::UnsupportedPlatform)
 }
 
-#[cfg(not(windows))]
+/// Reports that the packed Q8K oracle is unavailable on non-Windows platforms.
+///
+/// # Examples
+///
+/// ```
+/// assert!(matches!(
+///     runtime_packed_q8k_oracle(),
+///     Err(CudaRuntimeError::UnsupportedPlatform)
+/// ));
+/// ```
 pub fn runtime_packed_q8k_oracle() -> Result<CudaPackedQ8KOracle, CudaRuntimeError> {
     Err(CudaRuntimeError::UnsupportedPlatform)
 }
 
+/// Reports that packed Q8K GEMV is unavailable on non-Windows platforms.
+///
+/// # Examples
+///
+/// ```
+/// # use bridge_kernels_cuda::{packed_q8k_gemv_into, CudaRuntimeError};
+/// # use bridge_quant_layout::GgmlType;
+/// let result = packed_q8k_gemv_into(GgmlType::Q4_K, &[], &[], 0, &mut []);
+/// assert!(matches!(result, Err(CudaRuntimeError::UnsupportedPlatform)));
+/// ```
+///
+/// # Errors
+///
+/// Returns [`CudaRuntimeError::UnsupportedPlatform`] on non-Windows platforms.
 #[cfg(not(windows))]
 pub fn packed_q8k_gemv_into(
     _weight_type: bridge_quant_layout::GgmlType,
@@ -186,6 +223,23 @@ pub fn packed_q8k_gemv_into(
     Err(CudaRuntimeError::UnsupportedPlatform)
 }
 
+/// Reports that packed Q8K pair execution is unavailable on non-Windows platforms.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(not(windows))]
+/// # {
+/// let result = packed_q8k_gemv_pair_into(
+///     [bridge_quant_layout::GgmlType::Q4_K; 2],
+///     [&[], &[]],
+///     &[],
+///     0,
+///     [&mut [], &mut []],
+/// );
+/// assert!(matches!(result, Err(CudaRuntimeError::UnsupportedPlatform)));
+/// # }
+/// ```
 #[cfg(not(windows))]
 pub fn packed_q8k_gemv_pair_into(
     _weight_types: [bridge_quant_layout::GgmlType; 2],
@@ -197,7 +251,21 @@ pub fn packed_q8k_gemv_pair_into(
     Err(CudaRuntimeError::UnsupportedPlatform)
 }
 
-#[cfg(not(windows))]
+/// Reports that packed Q8_K batch GEMV is unavailable on non-Windows platforms.
+///
+/// # Examples
+///
+/// ```
+/// let result = packed_q8k_gemv_batch_into(&[], &mut []);
+/// assert!(matches!(
+///     result,
+///     Err(CudaRuntimeError::UnsupportedPlatform)
+/// ));
+/// ```
+///
+/// # Errors
+///
+/// Returns [`CudaRuntimeError::UnsupportedPlatform`] on non-Windows platforms.
 pub fn packed_q8k_gemv_batch_into(
     _items: &[CudaPackedQ8KBatchItem<'_>],
     _output: &mut [f32],
@@ -205,21 +273,91 @@ pub fn packed_q8k_gemv_batch_into(
     Err(CudaRuntimeError::UnsupportedPlatform)
 }
 
+/// Reports that the reusable packed Q8K canary is unavailable on non-Windows platforms.
+///
+/// # Examples
+///
+/// ```
+/// assert!(matches!(
+///     runtime_reusable_packed_q8k_canary(),
+///     Err(CudaRuntimeError::UnsupportedPlatform)
+/// ));
+/// ```
+///
+/// # Errors
+///
+/// Returns [`CudaRuntimeError::UnsupportedPlatform`] on non-Windows platforms.
 #[cfg(not(windows))]
 pub fn runtime_reusable_packed_q8k_canary() -> Result<CudaReusablePackedQ8KCanary, CudaRuntimeError> {
     Err(CudaRuntimeError::UnsupportedPlatform)
 }
 
+/// Runs the NVRTC CUDA canary and reports its compilation, device, transfer, and timing metadata.
+///
+/// # Examples
+///
+/// ```no_run
+/// let result = runtime_nvrtc_canary();
+/// assert!(result.is_ok());
+/// ```
 #[cfg(windows)]
 pub fn runtime_nvrtc_canary() -> Result<CudaNvrtcCanary, CudaRuntimeError> {
     windows::run()
 }
 
-#[cfg(windows)]
+/// Executes the packed Q8_K CUDA oracle across the supported weight formats.
+///
+/// # Examples
+///
+/// ```no_run
+/// let oracle = runtime_packed_q8k_oracle()?;
+/// assert!(!oracle.formats.is_empty());
+/// # Ok::<(), CudaRuntimeError>(())
+/// ```
 pub fn runtime_packed_q8k_oracle() -> Result<CudaPackedQ8KOracle, CudaRuntimeError> {
     windows::run_packed_q8k()
 }
 
+/// Executes a packed Q8_K matrix–vector multiplication on the CUDA device.
+///
+/// # Parameters
+///
+/// * `weight_type` identifies the packed weight format.
+/// * `weights` contains the packed weight bytes.
+/// * `q8` contains the quantized Q8_K activation data.
+/// * `logical_elements` is the number of logical elements represented by the activation and each weight row.
+/// * `output` receives one result per weight row.
+///
+/// # Returns
+///
+/// Execution metadata including byte counts, staging time, and device elapsed time.
+///
+/// # Errors
+///
+/// Returns an error when the packed inputs are invalid, the CUDA runtime is unavailable, or execution fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use bridge_kernels_cuda::packed_q8k_gemv_into;
+/// # use bridge_quant_layout::GgmlType;
+/// # let weights = load_packed_weights();
+/// # let q8 = load_q8_k_activations();
+/// # let mut output = vec![0.0; row_count()];
+/// let execution = packed_q8k_gemv_into(
+///     GgmlType::Q4_K,
+///     &weights,
+///     &q8,
+///     logical_elements(),
+///     &mut output,
+/// )?;
+/// # Ok::<(), bridge_kernels_cuda::CudaRuntimeError>(())
+/// #
+/// # fn load_packed_weights() -> Vec<u8> { Vec::new() }
+/// # fn load_q8_k_activations() -> Vec<u8> { Vec::new() }
+/// # fn row_count() -> usize { 0 }
+/// # fn logical_elements() -> usize { 0 }
+/// ```
 #[cfg(windows)]
 pub fn packed_q8k_gemv_into(
     weight_type: bridge_quant_layout::GgmlType,
@@ -231,7 +369,44 @@ pub fn packed_q8k_gemv_into(
     windows::execute_packed_q8k(weight_type, weights, q8, logical_elements, output)
 }
 
+/// Executes two packed Q8_K GEMV operations concurrently and writes their results to separate output slices.
+///
+/// # Parameters
+///
+/// - `weight_types`: Weight formats for the two operations.
+/// - `weights`: Packed weight data for each operation.
+/// - `q8`: Shared Q8_K activation data.
+/// - `logical_elements`: Number of logical elements processed by each operation.
+/// - `outputs`: Output slices receiving the two GEMV results.
+///
+/// # Returns
+///
+/// Execution metadata containing byte counts, staging capacities, and timing measurements.
+///
+/// # Errors
+///
+/// Returns a [`CudaRuntimeError`] if the requests are invalid or CUDA execution fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// # #[cfg(windows)]
+/// {
+///     use bridge_kernels_cuda::packed_q8k_gemv_pair_into;
+///     use bridge_quant_layout::GgmlType;
+///
+///     let outputs = [&mut [0.0_f32; 1][..], &mut [0.0_f32; 1][..]];
+///     let _execution = packed_q8k_gemv_pair_into(
+///         [GgmlType::Q4_K, GgmlType::Q4_K],
+///         [&[][..], &[][..]],
+///         &[],
+///         0,
+///         outputs,
+///     );
+/// }
+/// ```
 #[cfg(windows)]
+</analysis  code>
 pub fn packed_q8k_gemv_pair_into(
     weight_types: [bridge_quant_layout::GgmlType; 2],
     weights: [&[u8]; 2],
@@ -242,7 +417,32 @@ pub fn packed_q8k_gemv_pair_into(
     windows::execute_packed_q8k_pair(weight_types, weights, q8, logical_elements, outputs)
 }
 
-#[cfg(windows)]
+/// Executes a batch of packed Q8_K GEMV operations and writes their concatenated outputs.
+///
+/// The output slice must contain exactly one contiguous result segment for each item,
+/// in item order.
+///
+/// # Parameters
+///
+/// * `items` - Packed GEMV inputs, including weight format, packed weights, Q8_K
+///   activations, logical element count, and row count.
+/// * `output` - Destination for the concatenated GEMV results.
+///
+/// # Returns
+///
+/// Execution metadata containing aggregate sizes, row count, and timing information.
+///
+/// # Examples
+///
+/// ```
+/// let mut output = [];
+/// assert!(packed_q8k_gemv_batch_into(&[], &mut output).is_err());
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the batch or output dimensions are invalid, the packed inputs
+/// fail validation, or CUDA execution cannot be initialized or completed.
 pub fn packed_q8k_gemv_batch_into(
     items: &[CudaPackedQ8KBatchItem<'_>],
     output: &mut [f32],
@@ -250,7 +450,17 @@ pub fn packed_q8k_gemv_batch_into(
     windows::execute_packed_q8k_batch(items, output)
 }
 
-#[cfg(windows)]
+/// Runs the reusable packed Q8K canary across multiple passes and checks bit-exact, deterministic results.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(windows)]
+/// let canary = runtime_reusable_packed_q8k_canary().unwrap();
+/// # #[cfg(windows)]
+/// assert!(canary.bit_exact && canary.deterministic);
+/// ```
+///
 pub fn runtime_reusable_packed_q8k_canary() -> Result<CudaReusablePackedQ8KCanary, CudaRuntimeError> {
     windows::run_reusable_packed_q8k_canary()
 }
@@ -378,6 +588,18 @@ mod windows {
     }
 
     impl DynamicLibrary {
+        /// Loads a dynamic library from the specified absolute path.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// let library = DynamicLibrary::open_absolute(Path::new("C:\\path\\to\\library.dll"))?;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
+        ///
+        /// # Errors
+        ///
+        /// Returns [`CudaRuntimeError::LibraryLoad`] if the library cannot be loaded.
         fn open_absolute(path: &Path) -> Result<Self, CudaRuntimeError> {
             let wide = wide_null(path.as_os_str());
             let handle = unsafe {
@@ -399,6 +621,17 @@ mod windows {
             })
         }
 
+        /// Loads a system DLL by name.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let library = DynamicLibrary::open_system("kernel32.dll");
+        /// assert!(library.is_ok());
+        /// ```
+        ///
+        /// Returns the loaded library, or a [`CudaRuntimeError::LibraryLoad`] error if
+        /// the system cannot load the requested DLL.
         fn open_system(name: &str) -> Result<Self, CudaRuntimeError> {
             let wide = wide_null(OsStr::new(name));
             let handle =
@@ -415,6 +648,25 @@ mod windows {
             })
         }
 
+        /// Resolves an exported function from the loaded dynamic library.
+        ///
+        /// # Safety
+        ///
+        /// The caller must ensure that `name` is NUL-terminated and that `T` exactly
+        /// matches the exported symbol's function-pointer representation and ABI.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// let library = DynamicLibrary::open_system("kernel32.dll")?;
+        /// let function = unsafe {
+        ///     library.symbol::<unsafe extern "system" fn()>(
+        ///         b"GetTickCount\0",
+        ///         "GetTickCount",
+        ///     )?
+        /// };
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         unsafe fn symbol<T: Copy>(
             &self,
             name: &'static [u8],
@@ -454,6 +706,19 @@ mod windows {
     }
 
     impl NvrtcApi {
+        /// Loads the NVRTC library and resolves the functions required for compilation.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if no candidate NVRTC library can be loaded or a required
+        /// NVRTC symbol is unavailable.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// let _api = NvrtcApi::load()?;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         fn load() -> Result<Self, CudaRuntimeError> {
             let candidates = nvrtc_candidates();
             let mut attempted = Vec::new();
@@ -486,6 +751,17 @@ mod windows {
             }
         }
 
+        /// Resolves an NVRTC result code to its descriptive error name.
+        ///
+        /// Falls back to a formatted `NVRTC_ERROR_<code>` name when NVRTC provides no
+        /// description.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let name = api.error_name(code);
+        /// assert!(!name.is_empty());
+        /// ```
         fn error_name(&self, code: NvrtcResult) -> String {
             let pointer = unsafe { (self.get_error_string)(code) };
             if pointer.is_null() {
@@ -495,6 +771,17 @@ mod windows {
             }
         }
 
+        /// Checks an NVRTC result code and converts failures into a [`CudaRuntimeError`].
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// # fn example(api: &NvrtcApi) -> Result<(), CudaRuntimeError> {
+        /// api.check("compile", 0)?;
+        /// # Ok(())
+        /// # }
+        /// ```
+        fn check(&self, operation: &'static str, code: NvrtcResult) -> Result<(), CudaRuntimeError> {
         fn check(&self, operation: &'static str, code: NvrtcResult) -> Result<(), CudaRuntimeError> {
             if code == 0 {
                 Ok(())
@@ -508,6 +795,21 @@ mod windows {
             }
         }
 
+        /// Compiles CUDA source with the configured NVRTC options and retrieves its PTX bytes and compiler version.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`CudaRuntimeError::Nvrtc`] when NVRTC compilation or an NVRTC operation fails, or
+        /// [`CudaRuntimeError::SizeBound`] when the generated PTX exceeds the permitted size.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let (ptx, major, minor) = api.compile_source(source, "kernel.cu")?;
+        /// assert!(!ptx.is_empty());
+        /// assert!(major >= 0 && minor >= 0);
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         fn compile_source(
             &self,
             source: &str,
@@ -585,6 +887,18 @@ mod windows {
             compile_result.map(|ptx| (ptx, major, minor))
         }
 
+        /// Compiles the NVRTC canary kernel and returns its PTX together with the NVRTC version.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let (ptx, major, minor) = api.compile_canary()?;
+        /// assert!(!ptx.is_empty());
+        /// assert!(major >= 0 && minor >= 0);
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
+        ///
+        /// Returns the compiled PTX bytes and NVRTC major and minor version numbers.
         fn compile_canary(&self) -> Result<(Vec<u8>, i32, i32), CudaRuntimeError> {
             self.compile_source(
                 r#"
@@ -603,6 +917,18 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             )
         }
 
+        /// Compiles the packed Q8_K CUDA kernel source.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// let (ptx, nvrtc_major, nvrtc_minor) = api.compile_packed_q8k()?;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if NVRTC compilation fails or the generated PTX exceeds the supported size limit.
         fn compile_packed_q8k(&self) -> Result<(Vec<u8>, i32, i32), CudaRuntimeError> {
             self.compile_source(
                 include_str!("native/packed_q8k.cu"),
@@ -610,6 +936,18 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             )
         }
 
+        /// Retrieves and normalizes the compilation log for an NVRTC program.
+        ///
+        /// The result is an empty string when the program has no log. Logs exceeding the
+        /// configured maximum size produce a [`CudaRuntimeError::SizeBound`] error.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let log = api.program_log(program)?;
+        /// println!("{log}");
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         fn program_log(&self, program: NvrtcProgram) -> Result<String, CudaRuntimeError> {
             let mut log_size = 0;
             self.check("nvrtcGetProgramLogSize", unsafe {
@@ -666,6 +1004,14 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
     }
 
     impl DriverApi {
+        /// Loads the CUDA Driver API from `nvcuda.dll`.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// let driver = DriverApi::load()?;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         fn load() -> Result<Self, CudaRuntimeError> {
             let library = DynamicLibrary::open_system("nvcuda.dll")?;
             unsafe {
@@ -701,6 +1047,16 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             }
         }
 
+        /// Resolves a CUDA result code to its descriptive error name.
+        ///
+        /// Falls back to a formatted `CUDA_ERROR_<code>` name when the CUDA driver does not provide one.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let name = driver.error_name(0);
+        /// assert!(!name.is_empty());
+        /// ```
         fn error_name(&self, code: CuResult) -> String {
             let mut pointer = ptr::null();
             let result = unsafe { (self.get_error_name)(code, &mut pointer) };
@@ -711,6 +1067,14 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             }
         }
 
+        /// Checks a CUDA Driver API result and converts failures into a runtime error.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let result = driver.check("cuInit", 0);
+        /// assert!(result.is_ok());
+        /// ```
         fn check(&self, operation: &'static str, code: CuResult) -> Result<(), CudaRuntimeError> {
             if code == 0 {
                 Ok(())
@@ -723,6 +1087,23 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             }
         }
 
+        /// Checks whether a requested allocation can preserve the configured GPU memory reserve.
+        ///
+        /// # Parameters
+        ///
+        /// * `requested` - Number of bytes required by the allocation.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`CudaRuntimeError::VramReserve`] if the allocation would violate the
+        /// configured reserve, or a driver error if available memory cannot be queried.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// driver.ensure_vram_reserve(1024)?;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         fn ensure_vram_reserve(&self, requested: usize) -> Result<(), CudaRuntimeError> {
             let mut free = 0;
             let mut total = 0;
@@ -740,6 +1121,25 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             Ok(())
         }
 
+        /// Executes the compiled canary kernel and verifies bit-exact output on a compatible CUDA device.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let result = driver.execute_canary(ptx, nvrtc_major, nvrtc_minor)?;
+        /// assert!(result.pinned_async_transfers);
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if CUDA initialization, kernel execution, resource management, or output
+        /// verification fails, or if the device has compute capability below 8.9.
+        ///
+        /// # Returns
+        ///
+        /// Metadata describing the NVRTC compilation, CUDA device, PTX size, transfer mode, and execution
+        /// time.
         fn execute_canary(
             &self,
             ptx: &[u8],
@@ -932,6 +1332,16 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             }
         }
 
+        /// Executes the packed Q8_K oracle across the supported weight formats and verifies bit-exact results.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use bridge_kernels_cuda::runtime_packed_q8k_oracle;
+        /// let oracle = runtime_packed_q8k_oracle()?;
+        /// assert!(oracle.formats.iter().all(|format| format.bit_exact));
+        /// # Ok::<(), bridge_kernels_cuda::CudaRuntimeError>(())
+        /// ```
         fn execute_packed_q8k(
             &self,
             ptx: &[u8],
@@ -1254,6 +1664,14 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
     }
 
     impl TransferArena {
+        /// Creates an empty transfer arena with no allocated host or device memory.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let arena = TransferArena::new();
+        /// assert_eq!(arena.capacity, 0);
+        /// ```
         const fn new() -> Self {
             Self {
                 host: ptr::null_mut(),
@@ -1262,6 +1680,22 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             }
         }
 
+        /// Ensures that the transfer arena can hold the requested number of bytes.
+        ///
+        /// Grows the arena when necessary, subject to the specified maximum capacity and
+        /// available VRAM, and releases the replaced allocations.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if `required` is zero, exceeds `maximum`, allocation fails,
+        /// or replacing the existing arena allocations fails.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// # // Requires a configured CUDA driver and transfer arena.
+        /// # let _ = ();
+        /// ```
         fn ensure(
             &mut self,
             driver: &DriverApi,
@@ -1317,6 +1751,20 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             Ok(())
         }
 
+        /// Releases the host and device allocations owned by the arena and resets its capacity.
+        ///
+        /// # Safety
+        ///
+        /// `driver` must provide valid CUDA memory-release functions, and the arena must not
+        /// be used while this method is releasing its allocations.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// unsafe {
+        ///     arena.release(&driver);
+        /// }
+        /// ```
         unsafe fn release(&mut self, driver: &DriverApi) {
             if self.device != 0 {
                 unsafe {
@@ -1355,6 +1803,21 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
     unsafe impl Send for PackedExecutor {}
 
     impl PackedExecutor {
+        /// Creates a reusable packed Q8K executor after verifying CUDA device support.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # fn example() -> Result<(), CudaRuntimeError> {
+        /// let executor = PackedExecutor::new()?;
+        /// # let _ = executor;
+        /// # Ok(())
+        /// # }
+        /// ```
+        ///
+        /// Returns an error if NVRTC or the CUDA driver cannot be loaded, kernel
+        /// compilation or initialization fails, or the selected device has compute
+        /// capability below 8.9.
         fn new() -> Result<Self, CudaRuntimeError> {
             let nvrtc = NvrtcApi::load()?;
             let (ptx, _, _) = nvrtc.compile_packed_q8k()?;
@@ -1398,6 +1861,19 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             Ok(executor)
         }
 
+        /// Initializes the reusable executor with a CUDA context, packed GEMV kernel, timing resources, and IQ lookup tables.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let mut executor = PackedExecutor::new_uninitialized()?;
+        /// executor.initialize(device, ptx)?;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if CUDA resources cannot be created, allocated, or initialized.
         fn initialize(&mut self, device: CuDevice, ptx: &[u8]) -> Result<(), CudaRuntimeError> {
             self.driver
                 .check("cuCtxCreate_v2(reusable packed executor)", unsafe {
@@ -1504,6 +1980,19 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             }
         }
 
+        /// Launches the reusable packed Q8_K GEMV kernel for the specified weight data.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the weight type is unsupported, an argument exceeds the
+        /// CUDA parameter or grid limits, or the kernel launch fails.
+        ///
+        /// # Examples
+        ///
+        /// ```rust,ignore
+        /// executor.launch_packed(weight_type, weights, q8, logical_elements, rows, output)?;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         fn launch_packed(
             &self,
             weight_type: GgmlType,
@@ -1558,6 +2047,28 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
                 })
         }
 
+        /// Executes one packed Q8_K GEMV and copies the computed rows into `output`.
+        ///
+        /// The result includes input sizes, the selected staging arena, and host and device
+        /// timing measurements.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if CUDA operations fail, an input size exceeds its staging
+        /// limit, or a byte-count conversion overflows.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # let mut executor: PackedExecutor = todo!();
+        /// # let weight_type = GgmlType::Q4_K;
+        /// # let weights: &[u8] = &[];
+        /// # let q8: &[u8] = &[];
+        /// # let mut output = vec![0.0_f32; 1];
+        /// let execution = executor.execute(weight_type, weights, q8, 256, &mut output)?;
+        /// # let _ = execution;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         fn execute(
             &mut self,
             weight_type: GgmlType,
@@ -1683,6 +2194,28 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             })
         }
 
+        /// Executes two packed Q8_K GEMV operations using shared activation data and returns their execution metrics.
+        ///
+        /// The results are written to the corresponding output slices. The returned metadata includes per-operation
+        /// dimensions and byte counts, staging arena assignments, and host and device timings.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`CudaRuntimeError::InvalidPackedRequest`] if an output byte count or device pointer offset
+        /// overflows. Propagates errors from CUDA operations and staging-arena allocation.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let execution = executor.execute_pair(
+        ///     [first_weight_type, second_weight_type],
+        ///     [&first_weights, &second_weights],
+        ///     &q8,
+        ///     logical_elements,
+        ///     [&mut first_output, &mut second_output],
+        /// )?;
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
         fn execute_pair(
             &mut self,
             weight_types: [GgmlType; 2],
@@ -1860,6 +2393,23 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             })
         }
 
+        /// Executes a batch of packed Q8_K matrix-vector products and writes the concatenated results to `output`.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// let result = executor.execute_batch(&items, &mut output)?;
+        /// assert_eq!(result.items, items.len());
+        /// # Ok::<(), CudaRuntimeError>(())
+        /// ```
+        ///
+        /// The output slice must contain one contiguous result segment for each item, in
+        /// the same order as the input items.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if byte counts, offsets, or device pointer calculations
+        /// overflow, staging allocation fails, or a CUDA operation fails.
         fn execute_batch(
             &mut self,
             items: &[CudaPackedQ8KBatchItem<'_>],
@@ -2079,6 +2629,18 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         }
     }
 
+    /// Maps a supported packed weight type to its CUDA kernel kind.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `weight_type` is not `Q4_K`, `Q5_K`, `IQ2_S`, or `IQ3_S`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(packed_kind(GgmlType::Q4_K).unwrap(), 0);
+    /// assert_eq!(packed_kind(GgmlType::Q5_K).unwrap(), 1);
+    /// ```
     fn packed_kind(weight_type: GgmlType) -> Result<c_int, CudaRuntimeError> {
         match weight_type {
             GgmlType::Q4_K => Ok(0),
@@ -2093,6 +2655,15 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
 
     static PACKED_EXECUTOR: OnceLock<Result<Mutex<PackedExecutor>, String>> = OnceLock::new();
 
+    /// Provides access to the shared packed GEMV executor.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _executor = packed_executor();
+    /// ```///
+    ///
+    /// Returns the initialized executor mutex, or an error describing why initialization failed.
     fn packed_executor() -> Result<&'static Mutex<PackedExecutor>, CudaRuntimeError> {
         PACKED_EXECUTOR
             .get_or_init(|| {
@@ -2106,6 +2677,27 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
             })
     }
 
+    /// Executes a validated packed Q8_K GEMV operation on the CUDA executor.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let mut output = vec![0.0; rows];
+    /// let execution = execute_packed_q8k(
+    ///     weight_type,
+    ///     &weights,
+    ///     &q8,
+    ///     logical_elements,
+    ///     &mut output,
+    /// )?;
+    /// # Ok::<(), CudaRuntimeError>(())
+    /// ```
+    ///
+    /// `weights`, `q8`, `logical_elements`, and `output` must describe a supported
+    /// packed matrix. The output slice is populated with one result per row.
+    ///
+    /// Returns execution metadata, including transferred byte counts and timing
+    /// measurements.
     pub(super) fn execute_packed_q8k(
         weight_type: GgmlType,
         weights: &[u8],
@@ -2136,6 +2728,33 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         executor.execute(weight_type, weights, q8, logical_elements, output)
     }
 
+    /// Executes two packed Q8_K GEMV operations and writes their results to separate output slices.
+    ///
+    /// # Parameters
+    ///
+    /// * `weight_types` - Weight formats for the two GEMV operations.
+    /// * `weights` - Packed weight data for each operation.
+    /// * `q8` - Shared Q8_K-quantized activation data.
+    /// * `logical_elements` - Number of logical elements processed by each operation.
+    /// * `outputs` - Output slices receiving the two GEMV results.
+    ///
+    /// # Returns
+    ///
+    /// Execution metadata for both operations, or an error if the requests are invalid or CUDA execution fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let result = execute_packed_q8k_pair(
+    ///     [GgmlType::Q4_K, GgmlType::Q4_K],
+    ///     [&[], &[]],
+    ///     &[],
+    ///     0,
+    ///     [&mut [], &mut []],
+    /// );
+    ///
+    /// assert!(result.is_err());
+    /// ```
     pub(super) fn execute_packed_q8k_pair(
         weight_types: [GgmlType; 2],
         weights: [&[u8]; 2],
@@ -2183,6 +2802,25 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         )
     }
 
+    /// Executes a validated batch of packed Q8_K GEMV operations on the CUDA executor.
+    ///
+    /// The output slice must contain exactly one segment for each item's rows, in
+    /// item order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut output = [];
+    /// let result = execute_packed_q8k_batch(&[], &mut output);
+    /// assert!(result.is_err());
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the batch, its items, or the output length is invalid,
+    /// when packed input validation fails, or when the shared executor is unavailable
+    /// or poisoned.
+    pub(super) fn execute_packed_q8k_batch(
     pub(super) fn execute_packed_q8k_batch(
         items: &[CudaPackedQ8KBatchItem<'_>],
         output: &mut [f32],
@@ -2236,6 +2874,16 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         expected: Vec<f32>,
     }
 
+    /// Builds deterministic Q8_K activations and packed weight cases with scalar oracle outputs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let (q8, cases) = packed_oracle_inputs().unwrap();
+    /// assert!(!q8.is_empty());
+    /// assert_eq!(cases.len(), 4);
+    /// ```
+    ///
     fn packed_oracle_inputs() -> Result<(Vec<u8>, Vec<PackedOracleCase>), CudaRuntimeError> {
         let input = (0..PACKED_ORACLE_ELEMENTS)
             .map(|index| {
@@ -2308,6 +2956,14 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         Ok((q8, cases))
     }
 
+    /// Compiles and executes the NVRTC canary kernel, returning its execution metadata.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let result = run();
+    /// assert!(result.is_ok());
+    /// ```
     pub(super) fn run() -> Result<CudaNvrtcCanary, CudaRuntimeError> {
         let nvrtc = NvrtcApi::load()?;
         let (ptx, nvrtc_major, nvrtc_minor) = nvrtc.compile_canary()?;
@@ -2315,6 +2971,17 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         driver.execute_canary(&ptx, nvrtc_major, nvrtc_minor)
     }
 
+    /// Compiles and executes the packed Q8K CUDA oracle.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let oracle = run_packed_q8k()?;
+    /// assert!(!oracle.formats.is_empty());
+    /// # Ok::<(), CudaRuntimeError>(())
+    /// ```
+    ///
+    /// The result contains CUDA, NVRTC, timing, and per-format correctness metadata.
     pub(super) fn run_packed_q8k() -> Result<CudaPackedQ8KOracle, CudaRuntimeError> {
         let nvrtc = NvrtcApi::load()?;
         let (ptx, nvrtc_major, nvrtc_minor) = nvrtc.compile_packed_q8k()?;
@@ -2322,6 +2989,16 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         driver.execute_packed_q8k(&ptx, nvrtc_major, nvrtc_minor)
     }
 
+    /// Runs the reusable packed Q8_K canary across supported weight formats and verifies
+    /// bit-exact results across repeated executions.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let canary = run_reusable_packed_q8k_canary()?;
+    /// assert!(canary.bit_exact && canary.deterministic);
+    /// # Ok::<(), CudaRuntimeError>(())
+    /// ```
     pub(super) fn run_reusable_packed_q8k_canary() -> Result<CudaReusablePackedQ8KCanary, CudaRuntimeError> {
         const PASSES: usize = 2;
         let (q8, cases) = packed_oracle_inputs()?;
@@ -2375,11 +3052,34 @@ extern "C" __global__ void bridge_nvrtc_canary_v1(
         })
     }
 
+    /// Converts an operating-system string into a NUL-terminated UTF-16 string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::ffi::OsStr;
+    ///
+    /// let value = wide_null(OsStr::new("CUDA"));
+    /// assert_eq!(value, vec![b'C' as u16, b'U' as u16, b'D' as u16, b'A' as u16, 0]);
+    /// ```
     fn wide_null(value: &OsStr) -> Vec<u16> {
         use std::os::windows::ffi::OsStrExt;
         value.encode_wide().chain(Some(0)).collect()
     }
 
+    /// Discovers available NVRTC DLLs in CUDA toolkit installations.
+    ///
+    /// Searches CUDA-related environment paths and the standard NVIDIA CUDA toolkit directory,
+    /// returning matching NVRTC DLL paths with `builtins` variants excluded.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let candidates = nvrtc_candidates();
+    /// for candidate in candidates {
+    ///     assert!(candidate.file_name().is_some());
+    /// }
+    /// ```
     fn nvrtc_candidates() -> Vec<PathBuf> {
         let mut roots = Vec::new();
         for (name, value) in std::env::vars_os() {

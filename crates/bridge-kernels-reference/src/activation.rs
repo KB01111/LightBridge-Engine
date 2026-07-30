@@ -62,6 +62,24 @@ impl<'a> SwiGluScratch<'a> {
     }
 }
 
+/// Projects an input through a SwiGLU expert and writes the result to the output buffer.
+///
+/// # Errors
+///
+/// Returns an error if the input, output, or activation scratch buffer has an
+/// incompatible size, or if a projection or activation computation fails.
+///
+/// # Examples
+///
+/// ```
+/// # let mode = todo!();
+/// # let expert = todo!();
+/// # let input = todo!();
+/// # let mut output = todo!();
+/// # let mut scratch = todo!();
+/// swiglu_project_into(mode, expert, input, &mut output, &mut scratch)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub fn swiglu_project_into(
     mode: ReferenceExecutionMode,
     expert: SwiGluExpert<'_>,
@@ -93,6 +111,34 @@ pub fn swiglu_project_into(
     )
 }
 
+/// Accumulates an expert's SwiGLU projection into a destination buffer.
+///
+/// The computed projection is scaled by `coefficient` before being added to
+/// `destination`.
+///
+/// # Examples
+///
+/// ```ignore
+/// expert_swiglu_accumulate_into(
+///     mode,
+///     expert,
+///     input,
+///     &mut destination,
+///     coefficient,
+///     &mut scratch,
+/// )?;
+/// ```
+///
+/// # Parameters
+///
+/// * `coefficient` — Scale applied to the expert projection before accumulation.
+///
+/// # Errors
+///
+/// Returns an error if the coefficient or computed activations are non-finite,
+/// the input or destination dimensions are invalid, or a required computation
+/// fails.
+pub fn expert_swiglu_accumulate_into(
 pub fn expert_swiglu_accumulate_into(
     mode: ReferenceExecutionMode,
     expert: SwiGluExpert<'_>,
@@ -127,6 +173,21 @@ pub fn expert_swiglu_accumulate_into(
     )
 }
 
+/// Validates the input, output, and activation scratch dimensions required for an expert call.
+///
+/// # Errors
+///
+/// Returns a dimension mismatch error when the input or output length does not match
+/// the expert. Returns an arithmetic overflow error if the required activation scratch
+/// length cannot be computed, or a scratch-size error when the provided activation
+/// buffer is too short.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// validate_expert_call(expert, input, output, activation_scratch)?;
+/// # Ok::<(), KernelError>(())
+/// ```
 fn validate_expert_call(
     expert: SwiGluExpert<'_>,
     input: &[f32],
@@ -151,6 +212,19 @@ fn validate_expert_call(
     Ok(())
 }
 
+/// Applies the SwiGLU activation element-wise, storing the results in `gate`.
+///
+/// # Examples
+///
+/// ```
+/// let mut gate = [0.0_f32, 1.0];
+/// let up = [2.0_f32, 3.0];
+///
+/// apply_swiglu(&mut gate, &up).unwrap();
+///
+/// assert_eq!(gate[0], 0.0);
+/// assert!((gate[1] - 2.1931758).abs() < 1e-6);
+/// ```
 pub(crate) fn apply_swiglu(gate: &mut [f32], up: &[f32]) -> Result<()> {
     for (index, (gate_value, &up_value)) in gate.iter_mut().zip(up).enumerate() {
         let activated = *gate_value / (1.0_f32 + (-*gate_value).exp());

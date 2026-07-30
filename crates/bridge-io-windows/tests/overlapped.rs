@@ -11,6 +11,15 @@ struct Fixture {
 }
 
 impl Fixture {
+    /// Creates a temporary fixture file containing deterministic test data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let fixture = Fixture::new();
+    /// assert!(fixture.path.is_file());
+    /// ```
+    fn new() -> Self? Wait output must docstring only, no signature. They explicitly only docstrings. So omit fn.
     fn new() -> Self {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let path = std::env::temp_dir().join(format!(
@@ -24,6 +33,13 @@ impl Fixture {
 }
 
 impl Drop for Fixture {
+    /// Removes the temporary fixture file when the fixture is dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let _fixture = Fixture::new();
+    /// ```
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }

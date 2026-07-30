@@ -66,6 +66,16 @@ pub struct Hy3ScalarOptions {
 }
 
 impl Default for Hy3ScalarOptions {
+    /// Creates the default scalar model runtime options.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let options = Hy3ScalarOptions::default();
+    /// assert_eq!(options.context_capacity, 2_048);
+    /// assert_eq!(options.prefill_chunk, 1);
+    /// assert!(options.speculative_ngram_t.is_none());
+    /// ```
     fn default() -> Self {
         Self {
             context_capacity: 2_048,
@@ -294,10 +304,26 @@ impl Hy3ScalarModel {
         self.model_fingerprint
     }
 
+    /// Returns the number of bytes occupied by resident model weights.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes = model.resident_weight_bytes();
+    /// assert!(bytes > 0);
+    /// ```
     pub const fn resident_weight_bytes(&self) -> usize {
         self.resident_weight_bytes
     }
 
+    /// Identifies the currently active execution backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let name = model.backend_name();
+    /// assert!(!name.is_empty());
+    /// ```
     pub fn backend_name(&self) -> &'static str {
         match self.active_execution_mode() {
             ReferenceExecutionMode::DequantF32 => "scalar_reference_dequant_f32",
@@ -317,10 +343,28 @@ impl Hy3ScalarModel {
         self.cpu_backend.as_ref().map(|backend| backend.config().threads)
     }
 
+    /// Returns the CPU set identifiers configured for the CPU backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let set_ids = model.cpu_set_ids();
+    /// ```
+    pub fn cpu_set_ids...
     pub fn cpu_set_ids(&self) -> Option<&[u32]> {
         self.cpu_backend.as_ref().map(CpuBackend::cpu_set_ids)
     }
 
+    /// Determines whether the active CPU execution path has SIMD acceleration available.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn example(model: &Hy3ScalarModel) {
+    /// let simd_active = model.cpu_simd_active();
+    /// assert!(simd_active || !simd_active);
+    /// # }
+    /// ```
     pub fn cpu_simd_active(&self) -> bool {
         match self.active_execution_mode() {
             ReferenceExecutionMode::CpuParallelAvxVnni => {
@@ -334,15 +378,50 @@ impl Hy3ScalarModel {
         }
     }
 
+    /// Reports whether CUDA execution has fallen back to CPU execution.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// assert!(!model.cuda_fallback_active());
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `true` if CUDA execution is configured and disabled due to fallback, `false` otherwise.
     pub fn cuda_fallback_active(&self) -> bool {
         self.execution_mode == ReferenceExecutionMode::CudaQ8K && self.cuda_disabled.load(Ordering::Acquire)
     }
 
+    /// Activates CPU fallback for a CUDA-configured model.
+    ///
+    /// Returns `true` only when this call changes the model from CUDA execution to CPU fallback.
+    /// Repeated calls and calls on non-CUDA models return `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let model = load_cuda_model();
+    /// assert!(model.fall_back_to_cpu());
+    /// assert!(!model.fall_back_to_cpu());
+    /// ```
     pub fn fall_back_to_cpu(&self) -> bool {
         self.execution_mode == ReferenceExecutionMode::CudaQ8K
             && !self.cuda_disabled.swap(true, Ordering::AcqRel)
     }
 
+    /// Selects the execution mode currently used by the model, applying CPU fallback when CUDA execution has been disabled.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # let model: Hy3ScalarModel = todo!();
+    /// let mode = model.active_execution_mode();
+    /// assert!(matches!(
+    ///     mode,
+    ///     ReferenceExecutionMode::CpuParallelQ8K | ReferenceExecutionMode::CudaQ8K
+    /// ));
+    /// ```
     fn active_execution_mode(&self) -> ReferenceExecutionMode {
         if self.cuda_fallback_active() {
             ReferenceExecutionMode::CpuParallelQ8K
@@ -351,6 +430,14 @@ impl Hy3ScalarModel {
         }
     }
 
+    /// Indicates whether expert payload prefetching can run in parallel.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # let model: Hy3ScalarModel = todo!();
+    /// let parallel = model.parallel_expert_prefetch();
+    /// ```
     pub fn parallel_expert_prefetch(&self) -> bool {
         self.cpu_backend.is_some()
     }
@@ -411,6 +498,36 @@ impl Hy3ScalarModel {
         session.rollback_to(position)
     }
 
+    /// Loads a validated Hy3 model and initializes its execution, tensor, KV, and expert-cache state.
+    ///
+    /// Performs option, payload endianness, backend, CUDA qualification, and optional memory checks
+    /// before loading model weights and configuring expert payload access.
+    ///
+    /// # Parameters
+    ///
+    /// * `set` - GGUF model files containing the validated model payload.
+    /// * `validated` - Validated model structure and configuration.
+    /// * `source_sha256` - SHA-256 values associated with the model sources.
+    /// * `options` - Runtime, memory, execution, and expert-source configuration.
+    /// * `enforce_memory_preflight` - Whether to check the available physical memory before loading.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if validation, memory checks, backend qualification, tensor loading, expert
+    /// source setup, or runtime resource allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let model = Hy3ScalarModel::load_validated(
+    ///     set,
+    ///     validated,
+    ///     source_sha256,
+    ///     options,
+    ///     true,
+    /// )?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
     fn load_validated(
         set: GgufSet,
         validated: ValidatedHy3Model,
@@ -569,6 +686,29 @@ impl Hy3ScalarModel {
         })
     }
 
+    /// Evaluates one token and optionally projects the resulting hidden state into logits.
+    ///
+    /// On evaluation failure, restores the session to its position before the call. CUDA
+    /// kernel failures are retried using the CPU backend; if that retry fails, both errors
+    /// are reported.
+    ///
+    /// # Parameters
+    ///
+    /// * `token_id` — Token identifier to evaluate.
+    /// * `logits` — Buffer receiving vocabulary logits when projection is enabled.
+    /// * `project_logits` — Whether to compute logits for the evaluated token.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate(&mut session, token_id, &mut logits, true)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if evaluation fails or the session cannot be restored after a
+    /// failed evaluation.
     fn evaluate(
         &self,
         session: &mut Hy3ScalarSession,
@@ -598,6 +738,18 @@ impl Hy3ScalarModel {
         Err(error)
     }
 
+    /// Evaluates one token and optionally computes its logits.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_once(&mut session, token_id, &mut logits, true)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if token evaluation or optional logit projection fails.
     fn evaluate_once(
         &self,
         session: &mut Hy3ScalarSession,
@@ -613,6 +765,24 @@ impl Hy3ScalarModel {
         }
     }
 
+    /// Loads the specified expert payload into the cache and returns a lease for it.
+    ///
+    /// # Parameters
+    ///
+    /// * `key` identifies the expert payload to load.
+    /// * `layout` describes the payload's tensor segments and expected size.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the expert source or read-slot pool is unavailable, the
+    /// payload cannot be read, or cache insertion fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let lease = model.load_expert_lease(key, &layout)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
     fn load_expert_lease(
         &self,
         key: ExpertKey,
@@ -642,6 +812,29 @@ impl Hy3ScalarModel {
             .map_err(Hy3ScalarError::ExpertCache)
     }
 
+    /// Evaluates a group of tokens and optionally projects their hidden states into logits.
+    ///
+    /// A single-token input uses the single-token evaluation path. On failure, the session
+    /// is restored to its position before evaluation; CUDA kernel failures may be retried
+    /// using the CPU backend.
+    ///
+    /// # Arguments
+    ///
+    /// * `session` - Session whose KV cache and execution state are updated.
+    /// * `token_ids` - Tokens to evaluate as one grouped sequence.
+    /// * `logits` - Output buffer for projected logits when `project_logits` is `true`.
+    /// * `project_logits` - Whether to compute output logits for the evaluated tokens.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_grouped(&mut session, &[token_a, token_b], &mut logits, true)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if evaluation, validation, session rollback, or CUDA fallback fails.
     fn evaluate_grouped(
         &self,
         session: &mut Hy3ScalarSession,
@@ -674,6 +867,25 @@ impl Hy3ScalarModel {
         Err(error)
     }
 
+    /// Evaluates a group of tokens and optionally computes logits.
+    ///
+    /// # Parameters
+    ///
+    /// * `session` - Session state to update.
+    /// * `token_ids` - Tokens to evaluate in sequence.
+    /// * `logits` - Buffer receiving projected logits when requested.
+    /// * `project_logits` - Whether to compute logits for the evaluated group.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after successful evaluation, or a [`Hy3ScalarError`] describing the failure.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_grouped_once(&mut session, &token_ids, &mut logits, true)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
     fn evaluate_grouped_once(
         &self,
         session: &mut Hy3ScalarSession,
@@ -689,6 +901,25 @@ impl Hy3ScalarModel {
         }
     }
 
+    /// Evaluates exactly two tokens together for speculative decoding and writes logits for both tokens.
+    ///
+    /// The session is restored to its committed position if evaluation fails. CUDA kernel failures
+    /// may trigger a CPU retry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `token_ids` does not contain exactly two tokens, if `logits` does not
+    /// have `vocabulary_size * 2` elements, or if evaluation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_speculative_grouped(&mut session, &[first_token, second_token], &mut logits)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
+    ///
+    /// `token_ids` contains the two tokens to evaluate, and `logits` receives one vocabulary-sized
+    /// row for each token.
     fn evaluate_speculative_grouped(
         &self,
         session: &mut Hy3ScalarSession,
@@ -729,6 +960,24 @@ impl Hy3ScalarModel {
         Err(error)
     }
 
+    /// Evaluates a speculative token group and projects logits for each token.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_speculative_grouped_once(&mut session, &token_ids, &mut logits)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `session` - Session state used for evaluation.
+    /// * `token_ids` - Tokens to evaluate as a group.
+    /// * `logits` - Output buffer receiving the projected logits for each token.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after evaluation and projection succeed; otherwise, the execution error.
     fn evaluate_speculative_grouped_once(
         &self,
         session: &mut Hy3ScalarSession,
@@ -745,6 +994,18 @@ impl Hy3ScalarModel {
         }
     }
 
+    /// Activates CPU fallback when a CUDA kernel error occurs in CUDA execution mode.
+    ///
+    /// Returns `true` when fallback is activated, or `false` when the error does not
+    /// qualify for CUDA fallback.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # let model = /* a Hy3ScalarModel configured for CUDA execution */ todo!();
+    /// # let error = /* a CUDA kernel error */ todo!();
+    /// assert!(model.activate_cuda_fallback(&error));
+    /// ```
     fn activate_cuda_fallback(&self, error: &Hy3ScalarError) -> bool {
         if self.execution_mode == ReferenceExecutionMode::CudaQ8K
             && matches!(
@@ -759,6 +1020,20 @@ impl Hy3ScalarModel {
         }
     }
 
+    /// Projects each grouped hidden state into a row of vocabulary logits.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logits buffer has an invalid shape, grouped hidden
+    /// state is unavailable, or normalization or output projection fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// // Provide one vocabulary-sized logits row for each grouped token.
+    /// let logits = vec![0.0_f32; vocabulary_size * token_count];
+    /// assert_eq!(logits.len(), vocabulary_size * token_count);
+    /// ```
     fn project_grouped_logits_inner(
         &self,
         session: &mut Hy3ScalarSession,
@@ -798,6 +1073,29 @@ impl Hy3ScalarModel {
         Ok(())
     }
 
+    /// Evaluates a group of tokens and advances the session by the group length.
+    ///
+    /// The final token's hidden state is retained in the session. When `project_logits`
+    /// is enabled, the final hidden state is projected into `logits`.
+    ///
+    /// # Parameters
+    ///
+    /// * `token_ids` — Tokens to evaluate in sequence.
+    /// * `logits` — Output buffer for the final token's vocabulary logits when projection
+    ///   is enabled.
+    /// * `project_logits` — Whether to compute the final token's logits.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after successful evaluation, or a `Hy3ScalarError` describing validation,
+    /// execution, or resource-loading failure.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_grouped_inner(&mut session, &[first_token, second_token], &mut logits, true)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
     fn evaluate_grouped_inner(
         &self,
         session: &mut Hy3ScalarSession,
@@ -1031,6 +1329,31 @@ impl Hy3ScalarModel {
         Ok(())
     }
 
+    /// Evaluates one token and advances the session, optionally projecting the final hidden state into vocabulary logits.
+    ///
+    /// Validates the token and context position, executes all model layers, and loads routed Mixture-of-Experts
+    /// payloads when required. The `logits` buffer is used only when `project_logits` is `true`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the token, context position, or projected-logit buffer length is invalid, or if
+    /// model execution fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_inner(&mut session, token_id, &mut logits, true)?;
+    /// ```
+    ///
+    /// # Parameters
+    ///
+    /// * `token_id` — Token to evaluate.
+    /// * `logits` — Output buffer for projected vocabulary logits.
+    /// * `project_logits` — Whether to compute vocabulary logits.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after successful evaluation.
     fn evaluate_inner(
         &self,
         session: &mut Hy3ScalarSession,
@@ -1200,14 +1523,54 @@ impl CausalModel for Hy3ScalarModel {
         self.context_capacity
     }
 
+    /// Reports the configured token count for grouped prefill execution.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # let model = /* a configured Hy3ScalarModel */;
+    
+    /// let chunk = model.preferred_prefill_chunk();
+    /// assert!(chunk > 0);
+    /// ```
+    ///
+    /// Returns the configured grouped prefill chunk size.
     fn preferred_prefill_chunk(&self) -> usize {
         self.prefill_chunk
     }
 
+    /// Reports the configured speculative n-gram width.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(model.speculative_ngram_t(), Some(2));
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The configured speculative n-gram width, or `None` when speculation is disabled.
     fn speculative_ngram_t(&self) -> Option<usize> {
         self.speculative_ngram_t
     }
 
+    /// Creates a new session with an empty KV cache and execution workspaces.
+    ///
+    /// The session is initialized for token evaluation, grouped prefill, and any
+    /// Mixture-of-Experts layers present in the model.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let session = model.new_session()?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model lacks required layers or if session resources
+    /// cannot be initialized.
+    fn new_session(&self) -> Result<Self::Session, Self::Error>
     fn new_session(&self) -> Result<Self::Session, Self::Error> {
         let dense = self.layers.first().ok_or(Hy3ScalarError::MissingDenseLayer)?;
         let FeedForwardWeights::Dense(dense_expert) = &dense.feed_forward else {
@@ -1316,6 +1679,14 @@ impl CausalModel for Hy3ScalarModel {
         })
     }
 
+    /// Resets the session to its initial state, clearing cached data, scratch buffers, expert selections, activations, and position.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.reset_session(&mut session);
+    /// assert_eq!(session.position, 0);
+    /// ```
     fn reset_session(&self, session: &mut Self::Session) {
         session.cache.reset();
         session.dense_scratch.reset();
@@ -1346,6 +1717,19 @@ impl CausalModel for Hy3ScalarModel {
         session.position
     }
 
+    /// Evaluates one token and writes its vocabulary logits.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// model.evaluate_token(&mut session, token_id, &mut logits)?;
+    /// # Ok::<(), _>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if token evaluation fails or `logits` has an invalid length.
+    fn evaluate_token
     fn evaluate_token(
         &self,
         session: &mut Self::Session,
@@ -1355,6 +1739,23 @@ impl CausalModel for Hy3ScalarModel {
         self.evaluate(session, token_id, logits, true)
     }
 
+    /// Evaluates a token and optionally computes its vocabulary logits.
+    ///
+    /// # Parameters
+    ///
+    /// * `project_logits` — Whether to write the projected logits into `logits`.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let mut logits = vec![0.0; model.vocabulary_size()];
+    /// model.evaluate_token_with_projection(&mut session, token_id, &mut logits, true)?;
+    /// # Ok::<(), _>(())
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after the token is evaluated, or an error if evaluation fails.
     fn evaluate_token_with_projection(
         &self,
         session: &mut Self::Session,
@@ -1365,6 +1766,32 @@ impl CausalModel for Hy3ScalarModel {
         self.evaluate(session, token_id, logits, project_logits)
     }
 
+    /// Evaluates multiple tokens as a grouped prefill and optionally computes their logits.
+    ///
+    /// When `project_logits` is `true`, `logits` must have room for one vocabulary-sized
+    /// row per token.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let token_ids = [1, 2];
+    /// let mut logits = vec![0.0; model.vocabulary_size() * token_ids.len()];
+    /// model.evaluate_tokens_with_projection(
+    ///     &mut session,
+    ///     &token_ids,
+    ///     &mut logits,
+    ///     true,
+    /// )?;
+    /// # Ok::<(), ModelError>(())
+    /// ```
+    ///
+    /// # Parameters
+    ///
+    /// * `project_logits` — Whether to compute output logits for the evaluated tokens.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` after successful evaluation, or the runtime error that prevented it.
     fn evaluate_tokens_with_projection(
         &self,
         session: &mut Self::Session,
@@ -1375,6 +1802,19 @@ impl CausalModel for Hy3ScalarModel {
         self.evaluate_grouped(session, token_ids, logits, project_logits)
     }
 
+    /// Evaluates a two-token speculative sequence and computes logits for both tokens.
+    ///
+    /// # Returns
+    ///
+    /// `Some(Ok(()))` when evaluation succeeds, or `Some(Err(error))` when it fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let result = model.evaluate_speculative_tokens(&mut session, &[first, second], &mut logits);
+    /// result.unwrap()?;
+    /// # Ok::<(), ModelError>(())
+    /// ```
     fn evaluate_speculative_tokens(
         &self,
         session: &mut Self::Session,
@@ -1384,6 +1824,16 @@ impl CausalModel for Hy3ScalarModel {
         Some(self.evaluate_speculative_grouped(session, token_ids, logits))
     }
 
+    /// Rewinds a speculative session to the specified position.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let result = model.rewind_speculative(&mut session, position);
+    /// assert!(result.is_some());
+    /// ```
+    ///
+    /// The result contains an error if the session cannot be rewound.
     fn rewind_speculative(
         &self,
         session: &mut Self::Session,
@@ -1417,6 +1867,18 @@ impl Hy3ScalarSession {
         Ok(self.cache.stored_tokens(layer)?)
     }
 
+    /// Restores the session to a previously committed position and clears its transient execution state.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// session.rollback_to(committed_position)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the KV cache cannot be rewound to `committed_position`.
     fn rollback_to(&mut self, committed_position: usize) -> Result<(), Hy3ScalarError> {
         self.cache.rewind_all(committed_position)?;
         self.dense_scratch.reset();
@@ -1447,6 +1909,17 @@ impl Hy3ScalarSession {
     }
 }
 
+/// Restores a session to its committed position after an evaluation error.
+///
+/// If restoring the session fails, returns a [`Hy3ScalarError::SessionRollback`]
+/// containing both the original error and the rollback error.
+///
+/// # Examples
+///
+/// ```ignore
+/// let result = rollback_after_error(&mut session, committed_position, &error);
+/// assert!(result.is_ok());
+/// ```
 fn rollback_after_error(
     session: &mut Hy3ScalarSession,
     committed_position: usize,
@@ -1460,6 +1933,18 @@ fn rollback_after_error(
         })
 }
 
+/// Retrieves a hidden-state slice for a position in grouped storage.
+///
+/// # Examples
+///
+/// ```
+/// let values = vec![1.0, 2.0, 3.0, 4.0];
+/// assert_eq!(grouped_position(&values, 1, 2).unwrap(), &[3.0, 4.0]);
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the requested range overflows or falls outside `values`.
 fn grouped_position(values: &[f32], position: usize, width: usize) -> Result<&[f32], Hy3ScalarError> {
     let start = position
         .checked_mul(width)
@@ -1475,6 +1960,21 @@ fn grouped_position(values: &[f32], position: usize, width: usize) -> Result<&[f
         })
 }
 
+/// Gets the mutable hidden-state slice for a grouped position.
+///
+/// # Errors
+///
+/// Returns [`Hy3ScalarError::ArithmeticOverflow`] if the slice bounds overflow, or
+/// [`Hy3ScalarError::GroupedScratchMissing`] if the requested position is unavailable.
+///
+/// # Examples
+///
+/// ```
+/// let mut values = vec![0.0; 6];
+/// let slice = grouped_position_mut(&mut values, 1, 3).unwrap();
+/// slice[0] = 1.0;
+/// assert_eq!(&values[3..6], &[1.0, 0.0, 0.0]);
+/// ```
 fn grouped_position_mut(
     values: &mut [f32],
     position: usize,
@@ -1494,6 +1994,21 @@ fn grouped_position_mut(
         })
 }
 
+/// Selects the dense scratch buffer for a grouped execution position.
+///
+/// Position zero uses the primary buffer; subsequent positions use the corresponding buffer in `extra`.
+///
+/// # Errors
+///
+/// Returns [`Hy3ScalarError::GroupedScratchMissing`] when `extra` has no buffer for the position.
+///
+/// # Examples
+///
+/// ```ignore
+/// let scratch = grouped_dense_scratch_mut(&mut primary, &mut extra, 0)?;
+/// assert!(std::ptr::eq(scratch, &primary));
+/// # Ok::<(), Hy3ScalarError>(())
+/// ```
 fn grouped_dense_scratch_mut<'a>(
     primary: &'a mut Hy3BlockScratch,
     extra: &'a mut [Hy3BlockScratch],
@@ -1511,6 +2026,23 @@ fn grouped_dense_scratch_mut<'a>(
     }
 }
 
+/// Selects the MoE scratch buffer for a grouped position.
+///
+/// Position zero uses the primary scratch buffer; later positions use the corresponding buffer in `extra`.
+///
+/// # Errors
+///
+/// Returns [`Hy3ScalarError::MissingMoeScratch`] when position zero has no primary buffer, or
+/// [`Hy3ScalarError::GroupedScratchMissing`] when the requested grouped buffer is unavailable.
+///
+/// # Examples
+///
+/// ```
+/// let mut primary = None;
+/// let mut extra = [];
+///
+/// assert!(grouped_moe_scratch_mut(&mut primary, &mut extra, 0).is_err());
+/// ```
 fn grouped_moe_scratch_mut<'a>(
     primary: &'a mut Option<Hy3BlockScratch>,
     extra: &'a mut [Hy3BlockScratch],
@@ -1765,6 +2297,18 @@ enum ExpertSource {
 }
 
 impl ExpertSource {
+    /// Opens an expert payload source for the validated model.
+    ///
+    /// Direct sources load payloads from the GGUF set. Sidecar sources verify the
+    /// manifest's tensor-directory binding and optionally verify source bindings
+    /// and the sidecar data hash.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let source = ExpertSource::open(&set, &model, &ExpertSourceOptions::Direct)?;
+    /// # Ok::<(), Hy3ScalarError>(())
+    /// ```
     fn open(
         set: &GgufSet,
         model: &ValidatedHy3Model,
@@ -1798,6 +2342,23 @@ impl ExpertSource {
         }
     }
 
+    /// Reads an expert payload into a tightly packed output buffer.
+    ///
+    /// The output buffer must have the size specified by `layout`, and each payload
+    /// segment must match its corresponding layout segment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the payload size or any segment length is invalid, the
+    /// expert cannot be found, reading fails, or a size calculation overflows.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// source.read_tight_into(key, &layout, &mut output, &cancellation)?;
+    /// assert_eq!(output.len(), layout.total_bytes()?);
+    /// # Ok::<(), ExpertReadError>(())
+    /// ```
     fn read_tight_into(
         &self,
         key: ExpertKey,
@@ -1840,6 +2401,22 @@ impl ExpertSource {
     }
 }
 
+/// Builds a reusable read-slot pool sized for the routed expert payloads in the model.
+///
+/// Returns `None` when the model has no MoE layers. Otherwise, the pool contains
+/// enough aligned slots for the configured expert cache capacity.
+///
+/// # Examples
+///
+/// ```
+/// # fn example() -> Result<(), Hy3ScalarError> {
+/// let config = Hy3Config::default();
+/// let slots = build_expert_read_slots(&[], &config, 0)?;
+///
+/// assert!(slots.is_none());
+/// # Ok(())
+/// # }
+/// ```
 fn build_expert_read_slots(
     layers: &[LayerWeights],
     config: &Hy3Config,
@@ -1860,6 +2437,26 @@ fn build_expert_read_slots(
     Ok(Some(ReadSlotPool::new(slot_count, slot_bytes, 4_096)?))
 }
 
+/// Plans the number and size of reusable expert read slots for a cache.
+///
+/// Returns no plan when there are no expert layers. Otherwise, the slot size is
+/// the largest expert payload size, and the slot count is bounded by the cache
+/// capacity and total number of experts.
+///
+/// # Examples
+///
+/// ```
+/// let plan = expert_slot_plan(&[100, 200], 4, 500).unwrap();
+/// assert_eq!(plan, Some((2, 200)));
+///
+/// let empty = expert_slot_plan(&[], 4, 500).unwrap();
+/// assert_eq!(empty, None);
+/// ```
+///
+/// # Errors
+///
+/// Returns [`Hy3ScalarError::ArithmeticOverflow`] if the total expert count
+/// cannot be represented by `usize`.
 fn expert_slot_plan(
     expert_sizes: &[usize],
     experts_per_layer: usize,
@@ -2021,6 +2618,18 @@ impl TensorLoader {
     }
 }
 
+/// Validates runtime options against the model configuration and cache requirements.
+///
+/// # Errors
+///
+/// Returns an error when context, KV paging, prefill, speculation, cache, or
+/// grouped expert-cache settings are invalid or overflow during sizing.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_options(&model, &options).is_ok());
+/// ```
 fn validate_options(model: &ValidatedHy3Model, options: &Hy3ScalarOptions) -> Result<(), Hy3ScalarError> {
     if options.context_capacity == 0 || options.context_capacity > model.config().context_length as usize {
         return Err(Hy3ScalarError::InvalidContextCapacity {
@@ -2145,6 +2754,17 @@ fn required_tensor(model: &ValidatedHy3Model, role: Hy3TensorRole) -> Result<&Hy
         .ok_or(Hy3ScalarError::MissingTensorRole(role))
 }
 
+/// Derives the matrix layout for an expert tensor.
+///
+/// The tensor must have rank three and contain an expert slab for the specified number of experts.
+///
+/// # Examples
+///
+/// ```no_run
+/// let layout = matrix_layout(&tensor, 8)?;
+/// assert_eq!(layout.input_width, 4096);
+/// # Ok::<(), Hy3ScalarError>(())
+/// ```
 fn matrix_layout(tensor: &Hy3Tensor, expert_count: u32) -> Result<MatrixLayout, Hy3ScalarError> {
     let descriptor = tensor.location().descriptor();
     let shape = descriptor.shape();
@@ -2166,6 +2786,25 @@ fn matrix_layout(tensor: &Hy3Tensor, expert_count: u32) -> Result<MatrixLayout, 
     })
 }
 
+/// Validates that a segment has the expected byte length.
+///
+/// # Examples
+///
+/// ```
+/// assert!(validate_segment_length(16, 16, "gate").is_ok());
+/// assert!(validate_segment_length(8, 16, "gate").is_err());
+/// ```
+///
+/// # Arguments
+///
+/// * `actual` - The observed segment length in bytes.
+/// * `expected` - The required segment length in bytes.
+/// * `segment` - The segment name used in a length-mismatch error.
+///
+/// # Errors
+///
+/// Returns an error if the observed length cannot be represented as `usize` or
+/// differs from the expected length.
 fn validate_segment_length(
     actual: u64,
     expected: usize,

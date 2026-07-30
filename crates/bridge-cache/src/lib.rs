@@ -78,6 +78,18 @@ enum CachePayload {
 }
 
 impl CachePayload {
+    /// Reports the logical number of bytes represented by the payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let payload = CachePayload::Owned(vec![1, 2, 3]);
+    /// assert_eq!(payload.len(), 3);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The logical payload length in bytes.
     fn len(&self) -> usize {
         match self {
             Self::Owned(bytes) => bytes.len(),
@@ -85,6 +97,14 @@ impl CachePayload {
         }
     }
 
+    /// Returns the logical payload bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let payload = CachePayload::Owned(vec![1, 2, 3]);
+    /// assert_eq!(payload.bytes(), &[1, 2, 3]);
+    /// ```
     fn bytes(&self) -> &[u8] {
         match self {
             Self::Owned(bytes) => bytes,
@@ -92,6 +112,18 @@ impl CachePayload {
         }
     }
 
+    /// Reports the size of the storage backing the payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let payload = CachePayload::Owned(vec![1, 2, 3]);
+    /// assert_eq!(payload.backing_len(), 3);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The number of bytes available in the payload's backing storage.
     fn backing_len(&self) -> usize {
         match self {
             Self::Owned(bytes) => bytes.len(),
@@ -99,6 +131,15 @@ impl CachePayload {
         }
     }
 
+    /// Validates that the payload has sufficient backing storage for its logical length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let payload = CachePayload::Owned(vec![1, 2, 3]);
+    /// assert!(payload.validate_backing().is_ok());
+    /// ```
+    fn validate_backing(&self) -> Result<(), CacheError>
     fn validate_backing(&self) -> Result<(), CacheError> {
         match self {
             Self::ReadSlot { lease, length } if lease.as_slice().len() < *length => {
@@ -170,6 +211,33 @@ where
         }
     }
 
+    /// Loads and caches an owned byte vector for a key.
+    ///
+    /// The loader runs when the key is not already ready in the cache. Its output
+    /// must contain exactly `expected_bytes` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the loader error or a cache error if loading cannot be admitted or
+    /// the loaded data has an invalid size.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use bridge_cache::{CacheConfig, CompressedCache};
+    /// let cache = CompressedCache::new(CacheConfig {
+    ///     capacity_bytes: 1024,
+    ///     admit_after_requests: 1,
+    /// }).unwrap();
+    ///
+    /// let lease = cache
+    ///     .get_or_try_insert("item", 4, || {
+    ///         Ok::<_, std::convert::Infallible>(b"data".to_vec())
+    ///     })
+    ///     .unwrap();
+    ///
+    /// assert_eq!(lease.bytes(), b"data");
+    /// ```
     pub fn get_or_try_insert<E, F>(
         &self,
         key: K,
@@ -185,8 +253,32 @@ where
         })
     }
 
-    /// Loads directly into a reusable aligned read slot. The cache entry and
-    /// its active leases retain the slot; eviction recycles and poisons it.
+    /// Loads a cache entry into a reusable aligned read slot.
+    ///
+    /// The loader must provide a slot whose logical length is `expected_bytes` and whose backing storage is at least that large.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use bridge_cache::{CacheConfig, CompressedCache, ReadSlotLease};
+    /// # let cache = CompressedCache::new(CacheConfig {
+    /// #     capacity_bytes: 4096,
+    /// #     admit_after_requests: 1,
+    /// # }).unwrap();
+    /// let lease = cache.get_or_try_insert_read_slot(
+    ///     "block",
+    ///     1024,
+    ///     || -> Result<ReadSlotLease, std::io::Error> {
+    ///         unimplemented!()
+    ///     },
+    /// )?;
+    /// # let _ = lease;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// The loaded cache lease.
     pub fn get_or_try_insert_read_slot<E, F>(
         &self,
         key: K,
@@ -200,6 +292,34 @@ where
         self.get_or_try_insert_read_slot_charged(key, expected_bytes, expected_bytes, loader)
     }
 
+    /// Loads and caches data in a reusable read slot with explicit capacity charging.
+    ///
+    /// `expected_bytes` specifies the logical payload length, while `charge_bytes`
+    /// specifies the amount reserved against the cache capacity. The loaded read
+    /// slot must contain at least `charge_bytes` bytes of backing storage.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use bridge_cache::{CacheConfig, CompressedCache};
+    /// # use std::convert::Infallible;
+    /// let cache = CompressedCache::new(CacheConfig {
+    ///     capacity_bytes: 1024,
+    ///     admit_after_requests: 1,
+    /// }).unwrap();
+    ///
+    /// let _lease = cache.get_or_try_insert_read_slot_charged::<Infallible, _>(
+    ///     "item".to_owned(),
+    ///     128,
+    ///     256,
+    ///     || panic!("provide a ReadSlotLease"),
+    /// );
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns a cache error when the requested sizes are invalid, the loaded
+    /// payload has an unexpected length, or its backing storage is too small.
     pub fn get_or_try_insert_read_slot_charged<E, F>(
         &self,
         key: K,
@@ -219,6 +339,28 @@ where
         })
     }
 
+    /// Loads and caches a payload for a key, reusing an existing entry or coordinating concurrent loads.
+    ///
+    /// The payload must have the expected logical length, and its backing storage must cover
+    /// `charge_bytes`. Capacity reservations and cache admission are tracked using the supplied
+    /// charge.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cache = CompressedCache::new(CacheConfig {
+    ///     capacity_bytes: 3,
+    ///     admit_after_requests: 1,
+    /// }).unwrap();
+    ///
+    /// let lease = cache
+    ///     .get_or_try_insert_payload("item".to_string(), 3, 3, || {
+    ///         Ok::<_, std::convert::Infallible>(CachePayload::Owned(vec![1, 2, 3]))
+    ///     })
+    ///     .unwrap();
+    ///
+    /// assert_eq!(lease.bytes(), &[1, 2, 3]);
+    /// ```
     fn get_or_try_insert_payload<E, F>(
         &self,
         key: K,
@@ -411,6 +553,25 @@ where
         })
     }
 
+    /// Removes all ready cache entries that have no active leases.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cache = CompressedCache::<String>::new(CacheConfig {
+    ///     capacity_bytes: 16,
+    ///     admit_after_requests: 1,
+    /// }).unwrap();
+    ///
+    /// let lease = cache
+    ///     .get_or_try_insert("key".to_owned(), 3, || Ok::<_, ()>(vec![1, 2, 3]))
+    ///     .unwrap();
+    /// drop(lease);
+    ///
+    /// assert_eq!(cache.clear_unpinned().unwrap(), 1);
+    /// ```
+    ///
+    /// Returns the number of entries removed.
     pub fn clear_unpinned(&self) -> Result<usize, CacheError> {
         let mut state = self.lock()?;
         let keys = state
@@ -520,10 +681,45 @@ impl<K> CacheLease<K>
 where
     K: Clone + Eq + Hash,
 {
+    /// Provides the cached payload as a byte slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cache = CompressedCache::new(CacheConfig {
+    ///     capacity_bytes: 1024,
+    ///     admit_after_requests: 1,
+    /// })
+    /// .unwrap();
+    /// let lease = cache
+    ///     .get_or_try_insert::<(), _>(1u64, 3, || Ok(vec![1, 2, 3]))
+    ///     .unwrap();
+    ///
+    /// assert_eq!(lease.bytes(), &[1, 2, 3]);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// A byte slice containing the cached payload.
     pub fn bytes(&self) -> &[u8] {
         self.bytes.bytes()
     }
 
+    /// Returns the key associated with this lease.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cache = CompressedCache::new(CacheConfig {
+    ///     capacity_bytes: 3,
+    ///     admit_after_requests: 1,
+    /// }).unwrap();
+    /// let lease = cache
+    ///     .get_or_try_insert("key", 3, || Ok::<_, ()>(vec![1, 2, 3]))
+    ///     .unwrap();
+    ///
+    /// assert_eq!(lease.key(), &"key");
+    /// ```
     pub fn key(&self) -> &K {
         &self.key
     }
@@ -533,6 +729,13 @@ impl<K> Drop for CacheLease<K>
 where
     K: Clone + Eq + Hash,
 {
+    /// Releases the lease's pin and removes the entry when it is unresident and no longer pinned.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// drop(lease);
+    /// ```
     fn drop(&mut self) {
         let mut state = self
             .inner
@@ -570,6 +773,18 @@ impl<K> Drop for LoadReservation<K>
 where
     K: Clone + Eq + Hash,
 {
+    /// Releases an active loading reservation when it is dropped.
+    ///
+    /// Removes the matching loading entry, releases its reserved capacity, and
+    /// wakes threads waiting for the cache state to change.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn example() {
+    /// // A loading reservation is released automatically when it leaves scope.
+    /// # }
+    /// ```
     fn drop(&mut self) {
         if !self.armed {
             return;
@@ -679,6 +894,18 @@ fn next_tick<K>(state: &mut State<K>) -> u64 {
     state.tick
 }
 
+/// Ensures a requested reservation fits within the cache capacity by evicting the least recently used unpinned entries when necessary.
+///
+/// # Errors
+///
+/// Returns [`CacheError::CapacityPinned`] if capacity cannot be made available because all eligible entries are pinned. Returns [`CacheError::ArithmeticOverflow`] if accounting arithmetic overflows or becomes inconsistent.
+///
+/// # Examples
+///
+/// ```
+/// let mut state = State::default();
+/// assert!(reserve_capacity(&mut state, 1024, 512).is_ok());
+/// ```
 fn reserve_capacity<K>(state: &mut State<K>, capacity: usize, requested: usize) -> Result<(), CacheError>
 where
     K: Clone + Eq + Hash,

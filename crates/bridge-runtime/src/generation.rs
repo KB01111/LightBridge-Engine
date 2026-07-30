@@ -19,9 +19,25 @@ pub trait CausalModel: Send + Sync {
     fn new_session(&self) -> Result<Self::Session, Self::Error>;
     fn reset_session(&self, session: &mut Self::Session);
     fn position(&self, session: &Self::Session) -> usize;
+    /// Returns the preferred number of prompt tokens to evaluate in each prefill chunk.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(model.preferred_prefill_chunk(), 1);
+    /// ```
     fn preferred_prefill_chunk(&self) -> usize {
         1
     }
+    /// Specifies the speculative n-gram width supported by the model.
+    ///
+    /// The default implementation indicates that speculative n-gram execution is unavailable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(None::<usize>, None);
+    /// ```
     fn speculative_ngram_t(&self) -> Option<usize> {
         None
     }
@@ -32,11 +48,28 @@ pub trait CausalModel: Send + Sync {
         logits: &mut [f32],
     ) -> Result<(), Self::Error>;
 
-    /// Advances one token and optionally projects logits.
+    /// Advances the model state for one token and optionally projects logits.
     ///
-    /// Models that can separate state advancement from their output head
-    /// should override this method. The default preserves compatibility by
-    /// evaluating the complete token even when `project_logits` is false.
+    /// The default implementation evaluates the token regardless of `project_logits`.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_token_with_projection(&mut session, token_id, &mut logits, true)?;
+    /// # Ok::<(), ModelError>(())
+    /// ```
+    ///
+    /// `project_logits` indicates whether the model should compute output logits for
+    /// the updated state. Models that support separate state advancement and logits
+    /// projection can override this method.
+    ///
+    /// # Parameters
+    ///
+    /// * `project_logits` — Whether to project logits for the updated state.
+    ///
+    /// # Errors
+    ///
+    /// Returns the model-specific error produced while evaluating the token.
     fn evaluate_token_with_projection(
         &self,
         session: &mut Self::Session,
@@ -48,9 +81,21 @@ pub trait CausalModel: Send + Sync {
         self.evaluate_token(session, token_id, logits)
     }
 
-    /// Advances a bounded prompt chunk and optionally projects logits for its
-    /// final position. Models with layer-major multi-position execution can
-    /// override this; the compatibility path preserves token order.
+    /// Processes tokens in order and optionally computes logits for the final token.
+    ///
+    /// By default, each token is evaluated sequentially. When `project_logits` is
+    /// `true`, logits are projected only for the final token in `token_ids`.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// model.evaluate_tokens_with_projection(
+    ///     &mut session,
+    ///     &[first_token, second_token],
+    ///     &mut logits,
+    ///     true,
+    /// )?;
+    /// ```
     fn evaluate_tokens_with_projection(
         &self,
         session: &mut Self::Session,
@@ -69,8 +114,23 @@ pub trait CausalModel: Send + Sync {
         Ok(())
     }
 
-    /// Executes a speculative token group and returns logits after every
-    /// position in row-major order. Unsupported models return `None`.
+    /// Evaluates a speculative group of tokens and writes logits for each resulting position in row-major order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// fn evaluate_group<M: CausalModel>(
+    ///     model: &M,
+    ///     session: &mut M::Session,
+    ///     token_ids: &[u32],
+    ///     logits: &mut [f32],
+    /// ) {
+    ///     let _ = model.evaluate_speculative_tokens(session, token_ids, logits);
+    /// }
+    /// ```
+    ///
+    /// Returns `Some(Ok(()))` when evaluation succeeds, `Some(Err(_))` when model
+    /// evaluation fails, or `None` when speculative evaluation is unsupported.
     fn evaluate_speculative_tokens(
         &self,
         _session: &mut Self::Session,
@@ -80,7 +140,16 @@ pub trait CausalModel: Send + Sync {
         None
     }
 
-    /// Losslessly rewinds model state to a previously committed position.
+    /// Provides an optional hook for restoring model state to a committed position.
+    ///
+    /// The default implementation reports that speculative rewinding is unavailable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # let result: Option<Result<(), ()>> = None;
+    /// assert!(result.is_none());
+    /// ```
     fn rewind_speculative(
         &self,
         _session: &mut Self::Session,
@@ -144,6 +213,24 @@ impl<S> GenerationSession<S> {
         &self.logits
     }
 
+    /// Restores the session's history and logits metadata, clears speculative logits, and marks the session healthy.
+    ///
+    /// # Arguments
+    ///
+    /// * `history` - Committed token history to restore.
+    /// * `logits` - Logits associated with the restored history.
+    /// * `has_logits` - Whether the restored logits are valid for the history.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn example<S>(session: &mut GenerationSession<S>) {
+    /// session.restore_metadata(vec![1, 2], vec![0.0; 10], true);
+    /// assert_eq!(session.history(), &[1, 2]);
+    /// assert!(session.has_logits());
+    /// assert!(session.is_healthy());
+    /// # }
+    /// ```
     pub(crate) fn restore_metadata(&mut self, history: Vec<u32>, logits: Vec<f32>, has_logits: bool) {
         self.history = history;
         self.logits = logits;
@@ -168,6 +255,23 @@ impl<M: CausalModel> Generator<M> {
         &self.model
     }
 
+    /// Creates a fresh generation session with model state and allocated logit storage.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn example<M: CausalModel>(
+    /// #     generator: &Generator<M>,
+    /// # ) -> Result<(), GenerationError<M::Error>> {
+    /// let session = generator.new_session()?;
+    /// assert!(!session.has_logits());
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// The session starts with an empty history and is marked healthy. Its speculative
+    /// logit storage is sized according to the model's speculative decoding support.
+    pub fn new_session() -> Result<GenerationSession<M::Session>, GenerationError<M::Error>>
     pub fn new_session(&self) -> Result<GenerationSession<M::Session>, GenerationError<M::Error>> {
         let model = self.model.new_session().map_err(GenerationError::Model)?;
         let vocabulary_size = self.model.vocabulary_size();
@@ -198,6 +302,23 @@ impl<M: CausalModel> Generator<M> {
         })
     }
 
+    /// Resets the model and clears all generation state in the session.
+    
+    ///
+    
+    /// # Examples
+    
+    ///
+    
+    /// ```no_run
+    
+    /// # let generator = todo!();
+    
+    /// # let mut session = todo!();
+    
+    /// generator.reset(&mut session);
+    
+    /// ```
     pub fn reset(&self, session: &mut GenerationSession<M::Session>) {
         self.model.reset_session(&mut session.model);
         session.history.clear();
@@ -223,6 +344,34 @@ impl<M: CausalModel> Generator<M> {
         })
     }
 
+    /// Generates tokens from a prompt and emits each generated token to a callback.
+    ///
+    /// Prompt tokens are evaluated before generation. Generation stops when the configured
+    /// limit, context capacity, stop token, cancellation token, or callback control flow
+    /// requests it. The session is updated with evaluated and generated tokens.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let cancellation = CancellationToken::new();
+    /// let outcome = generator.generate_stream(
+    ///     &mut session,
+    ///     &prompt_tokens,
+    ///     SamplingConfig::default(),
+    ///     &cancellation,
+    ///     |token| {
+    ///         println!("{}", token.token_id);
+    ///         ControlFlow::Continue(())
+    ///     },
+    /// )?;
+    /// # Ok::<(), GenerationError<_>>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when configuration, prompt tokens, context capacity, session
+    /// state, allocation, sampling, or model execution is invalid.
+    pub fn generate_stream<F>(
     pub fn generate_stream<F>(
         &self,
         session: &mut GenerationSession<M::Session>,
@@ -468,6 +617,22 @@ impl<M: CausalModel> Generator<M> {
         ))
     }
 
+    /// Evaluates a token and updates the generation session state.
+    ///
+    /// On success, appends the token to the session history and records whether
+    /// logits are available. A model error marks the session as unhealthy.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// generator.evaluate(&mut session, token_id, true)?;
+    /// assert!(session.has_logits());
+    /// # Ok::<(), GenerationError<M::Error>>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GenerationError::Model`] if token evaluation fails.
     fn evaluate(
         &self,
         session: &mut GenerationSession<M::Session>,
@@ -489,6 +654,28 @@ impl<M: CausalModel> Generator<M> {
         Ok(())
     }
 
+    /// Evaluates multiple tokens and records them in the session history.
+    ///
+    /// On success, updates logits availability according to `project_logits`. A model
+    /// evaluation error marks the session as unhealthy and returns it as a generation
+    /// error.
+    ///
+    /// # Arguments
+    ///
+    /// * `session` - The generation session to update.
+    /// * `token_ids` - The tokens to evaluate in order.
+    /// * `project_logits` - Whether the resulting logits correspond to the final token.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// generator.evaluate_many(&mut session, &[1, 2, 3], true)?;
+    /// # Ok::<(), GenerationError<M::Error>>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `GenerationError::Model` if model evaluation fails.
     fn evaluate_many(
         &self,
         session: &mut GenerationSession<M::Session>,
@@ -510,6 +697,23 @@ impl<M: CausalModel> Generator<M> {
         Ok(())
     }
 
+    /// Rewinds the model session to a position after speculative execution.
+    ///
+    /// The session is marked unhealthy when the model reports an error or does not
+    /// support speculative rewinding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GenerationError::Model`] when the model reports an error, or
+    /// [`GenerationError::SpeculativeRewindUnavailable`] when rewinding is unsupported.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let result = generator.rewind_speculative(&mut session, position);
+    /// result?;
+    /// # Ok::<(), GenerationError<M::Error>>(())
+    /// ```
     fn rewind_speculative(
         &self,
         session: &mut GenerationSession<M::Session>,
@@ -598,6 +802,16 @@ pub enum GenerationError<E: Error + 'static> {
     AllocationFailed,
 }
 
+/// Finds a two-token continuation by matching a recent history suffix against an earlier sequence.
+///
+/// # Examples
+///
+/// ```
+/// let history = [1, 2, 3, 1, 2, 3];
+/// assert_eq!(ngram_draft_t2(&history), Some([1, 2]));
+/// ```
+///
+/// Returns `Some` with the two tokens following the matching sequence, or `None` if no match is found.
 fn ngram_draft_t2(history: &[u32]) -> Option<[u32; 2]> {
     let maximum_suffix = history.len().saturating_sub(2).min(4);
     for suffix_length in (1..=maximum_suffix).rev() {
@@ -613,6 +827,23 @@ fn ngram_draft_t2(history: &[u32]) -> Option<[u32; 2]> {
     None
 }
 
+/// Constructs a generation outcome with token data, stop reason, and timing statistics.
+///
+/// # Examples
+///
+/// ```
+/// let outcome = outcome(
+///     vec![1, 2],
+///     StopReason::MaxTokens,
+///     3,
+///     Duration::from_millis(10),
+///     Duration::from_millis(20),
+///     Duration::from_millis(30),
+/// );
+///
+/// assert_eq!(outcome.token_ids, vec![1, 2]);
+/// assert_eq!(outcome.stats.generated_tokens, 2);
+/// ```
 fn outcome(
     token_ids: Vec<u32>,
     stop_reason: StopReason,

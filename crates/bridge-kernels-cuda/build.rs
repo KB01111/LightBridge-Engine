@@ -1,3 +1,13 @@
+/// Configures and builds the CUDA native canary when the CUDA feature is enabled.
+///
+/// On Windows, rejects unsupported Visual Studio host compilers unless explicitly
+/// allowed through `LIGHTBRIDGE_CUDA_ALLOW_UNSUPPORTED_MSVC=1`.
+///
+/// # Examples
+///
+/// ```
+/// // Cargo runs this build script automatically when building with CUDA support.
+/// ```
 fn main() {
     println!("cargo:rerun-if-changed=src/native/canary.cu");
     println!("cargo:rerun-if-env-changed=LIGHTBRIDGE_CUDA_ALLOW_UNSUPPORTED_MSVC");
@@ -33,6 +43,16 @@ fn main() {
     build.compile("bridge_cuda_canary_v1");
 }
 
+/// Detects the major version of the newest installed Visual Studio instance.
+///
+/// Returns `None` when Visual Studio cannot be located, queried, or parsed.
+///
+/// # Examples
+///
+/// ```
+/// let version = newest_visual_studio_major();
+/// assert!(version.is_some() || version.is_none());
+/// ```
 fn newest_visual_studio_major() -> Option<u32> {
     let root = std::env::var_os("ProgramFiles(x86)")?;
     let vswhere = std::path::PathBuf::from(root)
