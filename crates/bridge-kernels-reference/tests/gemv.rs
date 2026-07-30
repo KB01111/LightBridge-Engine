@@ -1,9 +1,9 @@
 use bridge_core::ggml_type::GgmlType;
 use bridge_kernels_reference::{
-    gemv_accumulate_scaled_into, gemv_dequant_f32_into, gemv_into, gemv_llama_q8k_into, required_q8_k_bytes,
-    KernelError, PackedMatrix, PayloadEndian, ReferenceExecutionMode,
+    gemv_accumulate_scaled_into, gemv_dequant_f32_into, gemv_into, gemv_llama_q8k_into, gemv_pair_into,
+    required_q8_k_bytes, KernelError, PackedMatrix, PayloadEndian, ReferenceExecutionMode,
 };
-use bridge_quant_layout::{decode_row_into, vec_dot_q8_k};
+use bridge_quant_layout::{decode_row_into, vec_dot_q8_k, CpuDotBackend};
 
 const Q4: &[u8; 432] = include_bytes!("../../bridge-quant-layout/tests/fixtures/decode-q4-k.input.bin");
 const Q5: &[u8; 528] = include_bytes!("../../bridge-quant-layout/tests/fixtures/decode-q5-k.input.bin");
@@ -164,6 +164,182 @@ fn cpu_parallel_q8_k_is_bit_exact_for_every_selected_quantized_type() {
         .unwrap();
         assert_eq!(parallel.map(f32::to_bits), scalar.map(f32::to_bits), "{ty:?}");
         assert_eq!(parallel_q8, scalar_q8);
+        if CpuDotBackend::AvxVnni.available() {
+            let mut avx_vnni = [f32::NAN; 8];
+            let mut avx_vnni_q8 = vec![0_u8; required_q8_k_bytes(768).unwrap()];
+            gemv_into(
+                ReferenceExecutionMode::CpuParallelAvxVnni,
+                matrix,
+                &input,
+                &mut avx_vnni,
+                &mut [],
+                &mut avx_vnni_q8,
+            )
+            .unwrap();
+            assert_eq!(avx_vnni.map(f32::to_bits), scalar.map(f32::to_bits), "{ty:?}");
+            assert_eq!(avx_vnni_q8, scalar_q8);
+        }
+        if CpuDotBackend::Avx512Vnni.available() {
+            let mut avx512 = [f32::NAN; 8];
+            let mut avx512_q8 = vec![0_u8; required_q8_k_bytes(768).unwrap()];
+            gemv_into(
+                ReferenceExecutionMode::CpuParallelAvx512Vnni,
+                matrix,
+                &input,
+                &mut avx512,
+                &mut [],
+                &mut avx512_q8,
+            )
+            .unwrap();
+            assert_eq!(avx512.map(f32::to_bits), scalar.map(f32::to_bits), "{ty:?}");
+            assert_eq!(avx512_q8, scalar_q8);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn cuda_q8_k_is_bit_exact_for_gemv_pair_and_scaled_accumulation_when_available() {
+    if bridge_kernels_cuda::runtime_reusable_packed_q8k_canary().is_err() {
+        return;
+    }
+    let input = activations();
+    let cases: [(GgmlType, &[u8]); 4] = [
+        (GgmlType::Q4_K, Q4),
+        (GgmlType::Q5_K, Q5),
+        (GgmlType::IQ2_S, IQ2),
+        (GgmlType::IQ3_S, IQ3),
+    ];
+    for (ty, row) in cases {
+        let weights = row.repeat(8);
+        let matrix = matrix(ty, 768, 8, &weights);
+        let mut scalar = [f32::NAN; 8];
+        let mut cuda = [f32::NAN; 8];
+        let mut scalar_q8 = vec![0_u8; required_q8_k_bytes(768).unwrap()];
+        let mut cuda_q8 = vec![0_u8; required_q8_k_bytes(768).unwrap()];
+        gemv_into(
+            ReferenceExecutionMode::LlamaQ8K,
+            matrix,
+            &input,
+            &mut scalar,
+            &mut [],
+            &mut scalar_q8,
+        )
+        .unwrap();
+        gemv_into(
+            ReferenceExecutionMode::CudaQ8K,
+            matrix,
+            &input,
+            &mut cuda,
+            &mut [],
+            &mut cuda_q8,
+        )
+        .unwrap();
+        assert_eq!(cuda.map(f32::to_bits), scalar.map(f32::to_bits), "{ty:?}");
+        assert_eq!(cuda_q8, scalar_q8);
+
+        let mut destination = [1.0_f32; 8];
+        let mut accumulation_scratch = [0.0_f32; 8];
+        gemv_accumulate_scaled_into(
+            ReferenceExecutionMode::CudaQ8K,
+            matrix,
+            &input,
+            &mut destination,
+            0.25,
+            &mut accumulation_scratch,
+            &mut cuda_q8,
+        )
+        .unwrap();
+        for (actual, expected) in destination.iter().zip(scalar) {
+            assert_eq!(actual.to_bits(), (1.0 + 0.25 * expected).to_bits(), "{ty:?}");
+        }
+    }
+
+    let first_weights = IQ2.repeat(3);
+    let second_weights = IQ3.repeat(2);
+    let first = matrix(GgmlType::IQ2_S, 768, 3, &first_weights);
+    let second = matrix(GgmlType::IQ3_S, 768, 2, &second_weights);
+    let mut expected_first = [f32::NAN; 3];
+    let mut expected_second = [f32::NAN; 2];
+    let mut q8 = vec![0_u8; required_q8_k_bytes(768).unwrap()];
+    gemv_into(
+        ReferenceExecutionMode::LlamaQ8K,
+        first,
+        &input,
+        &mut expected_first,
+        &mut [],
+        &mut q8,
+    )
+    .unwrap();
+    gemv_into(
+        ReferenceExecutionMode::LlamaQ8K,
+        second,
+        &input,
+        &mut expected_second,
+        &mut [],
+        &mut q8,
+    )
+    .unwrap();
+    let mut actual_first = [f32::NAN; 3];
+    let mut actual_second = [f32::NAN; 2];
+    let mut pair_scratch = [0.0_f32; 5];
+    gemv_pair_into(
+        ReferenceExecutionMode::CudaQ8K,
+        [first, second],
+        &input,
+        [&mut actual_first, &mut actual_second],
+        &mut pair_scratch,
+        &mut q8,
+    )
+    .unwrap();
+    assert_eq!(actual_first.map(f32::to_bits), expected_first.map(f32::to_bits));
+    assert_eq!(actual_second.map(f32::to_bits), expected_second.map(f32::to_bits));
+}
+
+#[test]
+fn paired_packed_gemv_matches_two_independent_projections_bit_exactly() {
+    let input = activations();
+    let first_weights = IQ2.repeat(3);
+    let second_weights = IQ3.repeat(2);
+    let first = matrix(GgmlType::IQ2_S, 768, 3, &first_weights);
+    let second = matrix(GgmlType::IQ3_S, 768, 2, &second_weights);
+
+    for mode in [
+        ReferenceExecutionMode::LlamaQ8K,
+        ReferenceExecutionMode::CpuParallelQ8K,
+    ] {
+        let mut expected_first = [f32::NAN; 3];
+        let mut expected_second = [f32::NAN; 2];
+        let mut first_q8 = vec![0_u8; required_q8_k_bytes(768).unwrap()];
+        let mut second_q8 = vec![0_u8; required_q8_k_bytes(768).unwrap()];
+        gemv_into(mode, first, &input, &mut expected_first, &mut [], &mut first_q8).unwrap();
+        gemv_into(
+            mode,
+            second,
+            &input,
+            &mut expected_second,
+            &mut [],
+            &mut second_q8,
+        )
+        .unwrap();
+
+        let mut actual_first = [f32::NAN; 3];
+        let mut actual_second = [f32::NAN; 2];
+        let mut paired_q8 = vec![0_u8; required_q8_k_bytes(768).unwrap()];
+        gemv_pair_into(
+            mode,
+            [first, second],
+            &input,
+            [&mut actual_first, &mut actual_second],
+            &mut [],
+            &mut paired_q8,
+        )
+        .unwrap();
+
+        assert_eq!(actual_first.map(f32::to_bits), expected_first.map(f32::to_bits));
+        assert_eq!(actual_second.map(f32::to_bits), expected_second.map(f32::to_bits));
+        assert_eq!(paired_q8, first_q8);
+        assert_eq!(paired_q8, second_q8);
     }
 }
 
@@ -259,4 +435,70 @@ fn all_validation_failures_leave_output_unchanged() {
         Err(KernelError::UnsupportedType { ty: GgmlType::F32 })
     );
     assert_eq!(output.map(f32::to_bits), sentinel.map(f32::to_bits));
+}
+
+#[test]
+fn packed_matrix_validation_is_atomic_when_a_later_row_is_malformed() {
+    let mut weights = vec![0_u8; 288];
+    weights[144..146].copy_from_slice(&0x7c00_u16.to_le_bytes());
+    let bad_matrix = matrix(GgmlType::Q4_K, 256, 2, &weights);
+    let sentinel = [f32::from_bits(0x7fc0_00a5), f32::from_bits(0x8000_0000)];
+
+    for mode in [
+        ReferenceExecutionMode::LlamaQ8K,
+        ReferenceExecutionMode::CpuParallelQ8K,
+        ReferenceExecutionMode::CpuParallelAvxVnni,
+        ReferenceExecutionMode::CpuParallelAvx512Vnni,
+        ReferenceExecutionMode::CudaQ8K,
+    ] {
+        if mode == ReferenceExecutionMode::CpuParallelAvxVnni && !CpuDotBackend::AvxVnni.available() {
+            continue;
+        }
+        if mode == ReferenceExecutionMode::CpuParallelAvx512Vnni && !CpuDotBackend::Avx512Vnni.available() {
+            continue;
+        }
+        let mut output = sentinel;
+        let error = gemv_into(
+            mode,
+            bad_matrix,
+            &[0.0; 256],
+            &mut output,
+            &mut [],
+            &mut [0_u8; 292],
+        )
+        .unwrap_err();
+        if mode == ReferenceExecutionMode::CudaQ8K {
+            assert!(matches!(error, KernelError::Cuda { .. }));
+        } else {
+            assert!(matches!(
+                error,
+                KernelError::Quant(bridge_quant_layout::QuantError::NonFiniteScale { block_index: 1, .. })
+            ));
+        }
+        assert_eq!(output.map(f32::to_bits), sentinel.map(f32::to_bits));
+    }
+}
+
+#[test]
+fn paired_gemv_validates_both_matrices_before_publishing_either_output() {
+    let first = matrix(GgmlType::Q4_K, 256, 1, &Q4[..144]);
+    let mut second_weights = vec![0_u8; 288];
+    second_weights[144..146].copy_from_slice(&0x7c00_u16.to_le_bytes());
+    let second = matrix(GgmlType::Q4_K, 256, 2, &second_weights);
+    let first_sentinel = [f32::from_bits(0x7fc0_00a5)];
+    let second_sentinel = [f32::from_bits(0x8000_0000), f32::from_bits(0x7fc0_00b6)];
+    let mut first_output = first_sentinel;
+    let mut second_output = second_sentinel;
+
+    assert!(gemv_pair_into(
+        ReferenceExecutionMode::CpuParallelQ8K,
+        [first, second],
+        &[0.0; 256],
+        [&mut first_output, &mut second_output],
+        &mut [],
+        &mut [0_u8; 292],
+    )
+    .is_err());
+    assert_eq!(first_output.map(f32::to_bits), first_sentinel.map(f32::to_bits));
+    assert_eq!(second_output.map(f32::to_bits), second_sentinel.map(f32::to_bits));
 }

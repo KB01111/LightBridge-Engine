@@ -3,10 +3,11 @@ use bridge_model_hy3::{route_experts_into, RouteCandidate, RoutedExpert};
 
 use crate::error::Result;
 use crate::{
-    apply_neox_yarn_rope_in_place, causal_gqa_attention_into, gemv_into, moe_routed_by_id_into,
-    moe_selected_into, residual_add_in_place, swiglu_project_into, weighted_head_rms_norm_in_place,
-    weighted_rms_norm_into, AttentionInput, AttentionScratch, Hy3RopeParams, KernelError, PackedMatrix,
-    ReferenceExecutionMode, RoutedMoeSelection, SelectedExpert, SwiGluExpert, SwiGluScratch,
+    apply_neox_yarn_rope_in_place, causal_gqa_attention_into, gemv_into, gemv_triplet_into,
+    moe_routed_by_id_into, moe_selected_into, residual_add_in_place, swiglu_project_into,
+    weighted_head_rms_norm_in_place, weighted_rms_norm_into, AttentionInput, AttentionScratch, Hy3RopeParams,
+    KernelError, PackedMatrix, ReferenceExecutionMode, RoutedMoeSelection, SelectedExpert, SwiGluExpert,
+    SwiGluScratch,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -139,6 +140,26 @@ impl Hy3BlockScratch {
         let activation_values = ffn_hidden.checked_mul(2).ok_or(KernelError::ArithmeticOverflow {
             operation: "SwiGLU activation scratch",
         })?;
+        let batch_experts = expert_used_count
+            .checked_add(1)
+            .ok_or(KernelError::ArithmeticOverflow {
+                operation: "CUDA MoE batch expert count",
+            })?;
+        let swiglu_scratch_values = activation_values.max(hidden).checked_mul(batch_experts).ok_or(
+            KernelError::ArithmeticOverflow {
+                operation: "CUDA MoE activation/output batch scratch",
+            },
+        )?;
+        let attention_projection_values = query_values
+            .checked_add(key_values)
+            .and_then(|value| value.checked_add(value_values))
+            .ok_or(KernelError::ArithmeticOverflow {
+                operation: "batched query/key/value output scratch",
+            })?;
+        let decoded_scratch_values = 256
+            .max(hidden)
+            .max(activation_values)
+            .max(attention_projection_values);
         let maximum_input = [
             hidden,
             attention_values,
@@ -148,11 +169,21 @@ impl Hy3BlockScratch {
         .into_iter()
         .max()
         .unwrap_or(hidden);
-        let q8_bytes = if maximum_input >= 256 {
+        let single_q8_bytes = if maximum_input >= 256 {
             crate::required_q8_k_bytes(maximum_input)?
         } else {
             0
         };
+        let batched_down_q8_bytes = if ffn_hidden >= 256 {
+            crate::required_q8_k_bytes(ffn_hidden)?
+                .checked_mul(batch_experts)
+                .ok_or(KernelError::ArithmeticOverflow {
+                    operation: "CUDA MoE down-projection Q8_K batch scratch",
+                })?
+        } else {
+            0
+        };
+        let q8_bytes = single_q8_bytes.max(batched_down_q8_bytes);
 
         Ok(Self {
             attention_normalized: zeroed_f32(hidden, "attention normalized")?,
@@ -166,8 +197,8 @@ impl Hy3BlockScratch {
             ffn_normalized: zeroed_f32(hidden, "FFN normalized")?,
             ffn_delta: zeroed_f32(hidden, "FFN delta")?,
             preflight_output: zeroed_f32(hidden, "MoE preflight output")?,
-            swiglu_activation: zeroed_f32(activation_values, "SwiGLU activation")?,
-            decoded_block: zeroed_f32(256, "decoded quant block")?,
+            swiglu_activation: zeroed_f32(swiglu_scratch_values, "SwiGLU/CUDA MoE batch")?,
+            decoded_block: zeroed_f32(decoded_scratch_values, "decoded/CUDA output scratch")?,
             q8: zeroed_u8(q8_bytes, "Q8_K activation")?,
             scores: zeroed_f32(context_capacity, "attention scores")?,
             router_logits: zeroed_f32(expert_count, "router logits")?,
@@ -213,15 +244,47 @@ impl Hy3BlockScratch {
         let activation_values = ffn_hidden.checked_mul(2).ok_or(KernelError::ArithmeticOverflow {
             operation: "SwiGLU activation scratch",
         })?;
+        let batch_experts =
+            block
+                .expert_used_count
+                .checked_add(1)
+                .ok_or(KernelError::ArithmeticOverflow {
+                    operation: "streaming CUDA MoE batch expert count",
+                })?;
+        let swiglu_scratch_values = activation_values.max(hidden).checked_mul(batch_experts).ok_or(
+            KernelError::ArithmeticOverflow {
+                operation: "streaming CUDA MoE activation/output batch scratch",
+            },
+        )?;
+        let attention_projection_values = query_values
+            .checked_add(key_values)
+            .and_then(|value| value.checked_add(value_values))
+            .ok_or(KernelError::ArithmeticOverflow {
+                operation: "streaming batched query/key/value output scratch",
+            })?;
+        let decoded_scratch_values = 256
+            .max(hidden)
+            .max(activation_values)
+            .max(attention_projection_values);
         let maximum_input = [hidden, attention_values, ffn_hidden, block.router.input_width()]
             .into_iter()
             .max()
             .unwrap_or(hidden);
-        let q8_bytes = if maximum_input >= 256 {
+        let single_q8_bytes = if maximum_input >= 256 {
             crate::required_q8_k_bytes(maximum_input)?
         } else {
             0
         };
+        let batched_down_q8_bytes = if ffn_hidden >= 256 {
+            crate::required_q8_k_bytes(ffn_hidden)?
+                .checked_mul(batch_experts)
+                .ok_or(KernelError::ArithmeticOverflow {
+                    operation: "streaming CUDA MoE down-projection Q8_K batch scratch",
+                })?
+        } else {
+            0
+        };
+        let q8_bytes = single_q8_bytes.max(batched_down_q8_bytes);
 
         Ok(Self {
             attention_normalized: zeroed_f32(hidden, "attention normalized")?,
@@ -235,8 +298,8 @@ impl Hy3BlockScratch {
             ffn_normalized: zeroed_f32(hidden, "FFN normalized")?,
             ffn_delta: zeroed_f32(hidden, "FFN delta")?,
             preflight_output: zeroed_f32(hidden, "MoE preflight output")?,
-            swiglu_activation: zeroed_f32(activation_values, "SwiGLU activation")?,
-            decoded_block: zeroed_f32(256, "decoded quant block")?,
+            swiglu_activation: zeroed_f32(swiglu_scratch_values, "SwiGLU/CUDA MoE batch")?,
+            decoded_block: zeroed_f32(decoded_scratch_values, "decoded/CUDA output scratch")?,
             q8: zeroed_u8(q8_bytes, "Q8_K activation")?,
             scores: zeroed_f32(context_capacity, "attention scores")?,
             router_logits: zeroed_f32(block.expert_count, "router logits")?,
@@ -331,27 +394,11 @@ pub fn hy3_block_forward_token(
         execution.rms_epsilon,
         &mut scratch.attention_normalized,
     )?;
-    gemv_into(
+    gemv_triplet_into(
         execution.mode,
-        attention.query,
+        [attention.query, attention.key, attention.value],
         &scratch.attention_normalized,
-        &mut scratch.queries,
-        &mut scratch.decoded_block,
-        &mut scratch.q8,
-    )?;
-    gemv_into(
-        execution.mode,
-        attention.key,
-        &scratch.attention_normalized,
-        &mut scratch.keys,
-        &mut scratch.decoded_block,
-        &mut scratch.q8,
-    )?;
-    gemv_into(
-        execution.mode,
-        attention.value,
-        &scratch.attention_normalized,
-        &mut scratch.values,
+        [&mut scratch.queries, &mut scratch.keys, &mut scratch.values],
         &mut scratch.decoded_block,
         &mut scratch.q8,
     )?;
@@ -500,27 +547,11 @@ pub fn hy3_moe_route_token(
         execution.rms_epsilon,
         &mut scratch.attention_normalized,
     )?;
-    gemv_into(
+    gemv_triplet_into(
         execution.mode,
-        attention.query,
+        [attention.query, attention.key, attention.value],
         &scratch.attention_normalized,
-        &mut scratch.queries,
-        &mut scratch.decoded_block,
-        &mut scratch.q8,
-    )?;
-    gemv_into(
-        execution.mode,
-        attention.key,
-        &scratch.attention_normalized,
-        &mut scratch.keys,
-        &mut scratch.decoded_block,
-        &mut scratch.q8,
-    )?;
-    gemv_into(
-        execution.mode,
-        attention.value,
-        &scratch.attention_normalized,
-        &mut scratch.values,
+        [&mut scratch.queries, &mut scratch.keys, &mut scratch.values],
         &mut scratch.decoded_block,
         &mut scratch.q8,
     )?;

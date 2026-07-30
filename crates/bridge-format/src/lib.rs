@@ -324,6 +324,43 @@ impl Sidecar {
         })
     }
 
+    /// Reads the three packed expert segments directly into their final tight
+    /// destination, skipping the record-sized allocation and compaction copy.
+    pub fn read_expert_into(
+        &self,
+        key: ExpertKey,
+        output: &mut [u8],
+        cancellation: &ReadCancellation,
+    ) -> Result<(), SidecarError> {
+        let record = self
+            .manifest
+            .record(key)
+            .ok_or(SidecarError::MissingExpert(key))?;
+        let gate = usize::try_from(record.gate.length).map_err(|_| FormatError::ArithmeticOverflow)?;
+        let up = usize::try_from(record.up.length).map_err(|_| FormatError::ArithmeticOverflow)?;
+        let down = usize::try_from(record.down.length).map_err(|_| FormatError::ArithmeticOverflow)?;
+        let expected = gate
+            .checked_add(up)
+            .and_then(|length| length.checked_add(down))
+            .ok_or(FormatError::ArithmeticOverflow)?;
+        if output.len() != expected {
+            return Err(SidecarError::DestinationLength {
+                expected,
+                actual: output.len(),
+            });
+        }
+
+        let (gate_output, remainder) = output.split_at_mut(gate);
+        let (up_output, down_output) = remainder.split_at_mut(up);
+        self.data
+            .read_exact_at_into(record.gate.offset, gate_output, cancellation)?;
+        self.data
+            .read_exact_at_into(record.up.offset, up_output, cancellation)?;
+        self.data
+            .read_exact_at_into(record.down.offset, down_output, cancellation)?;
+        Ok(())
+    }
+
     pub fn verify_data_hash(&self, cancellation: &ReadCancellation) -> Result<(), SidecarError> {
         let mut hasher = Sha256::new();
         let chunk_size = self.data.limits().max_request_bytes.min(8 * 1024 * 1024);
@@ -529,6 +566,8 @@ pub enum SidecarError {
     HeaderManifestMismatch,
     #[error("sidecar does not contain expert {0:?}")]
     MissingExpert(ExpertKey),
+    #[error("expert destination is {actual} bytes, expected {expected}")]
+    DestinationLength { expected: usize, actual: usize },
     #[error("sidecar SHA-256 is {actual}, manifest declares {expected}")]
     DataHash { expected: String, actual: String },
 }

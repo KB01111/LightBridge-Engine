@@ -82,6 +82,13 @@ fn two_step_teacher_forced_sequence_has_stable_named_outputs() {
                 ReferenceExecutionMode::DequantF32 => "dequant_f32",
                 ReferenceExecutionMode::LlamaQ8K => "llama_q8_k",
                 ReferenceExecutionMode::CpuParallelQ8K => "cpu_parallel_q8_k",
+                ReferenceExecutionMode::CpuParallelAvxVnni => {
+                    "cpu_parallel_avx_vnni_q8_k"
+                }
+                ReferenceExecutionMode::CpuParallelAvx512Vnni => {
+                    "cpu_parallel_avx512_vnni_q8_k"
+                }
+                ReferenceExecutionMode::CudaQ8K => "cuda_q8_k",
             }
         );
         let mut session = model.new_session().unwrap();

@@ -18,6 +18,8 @@ members = [
     "crates/bridge-format",
     "crates/bridge-prepare",
     "crates/bridge-cache",
+    "crates/bridge-scheduler",
+    "crates/bridge-kernels-cuda",
 ]
 
 [workspace.package]
@@ -46,6 +48,8 @@ bridge-io-windows = { path = "crates/bridge-io-windows" }
 bridge-format = { path = "crates/bridge-format" }
 bridge-prepare = { path = "crates/bridge-prepare" }
 bridge-cache = { path = "crates/bridge-cache" }
+bridge-scheduler = { path = "crates/bridge-scheduler" }
+bridge-kernels-cuda = { path = "crates/bridge-kernels-cuda" }
 
 thiserror = "2"
 anyhow = "1"
@@ -76,6 +80,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
+    "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_System_SystemInformation",
     "Win32_System_Memory",

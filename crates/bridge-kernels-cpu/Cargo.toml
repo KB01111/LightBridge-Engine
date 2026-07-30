@@ -8,6 +8,7 @@ authors.workspace = true
 description = "Bounded CPU execution pool and ISA dispatch for LightBridge kernels."
 
 [dependencies]
+bridge-core.workspace = true
 bridge-kernels-reference.workspace = true
 rayon.workspace = true
 thiserror.workspace = true

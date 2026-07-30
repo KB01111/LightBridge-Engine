@@ -1,6 +1,6 @@
 # LightBridge Engine status
 
-Snapshot date: **2026-07-29**
+Snapshot date: **2026-07-30**
 
 The CPU baseline is implemented and accepted end to end. This document
 separates shipped runtime behavior, locally verified acceptance, and
@@ -15,25 +15,27 @@ hardware/model-inapplicable optional acceleration.
 | Split GGUF handling | Implemented | Strict numbered-shard discovery, common-field checks, and global tensor directory |
 | Hy3 validation | Implemented | Exact configuration and 1,278-tensor schema validation for 80 blocks and 192 experts |
 | Payload authentication | Implemented | Product loading checks physical completeness, exact 96,019,311,104-byte length, and pinned SHA-256 before execution |
-| Quantization | Implemented and oracle-verified | F32, IQ2_S, IQ3_S, Q4_K, Q5_K, Q8_K, four exact packed dot paths, malformed-scale and atomic-output coverage |
-| CPU execution | Implemented | Scalar diagnostics plus bounded row-parallel AVX2 integer dots selected at runtime; mixed F32 routers execute correctly |
+| Quantization | Implemented and oracle-verified | F32, IQ2_S, IQ3_S, Q4_K, Q5_K, Q8_K, four exact packed dot paths, malformed-scale and atomic-output coverage; validated matrix handles eliminate repeated common-row checks without weakening all-row-before-write atomicity |
+| CPU execution | Implemented | Scalar diagnostics plus bounded row-parallel AVX2 integer dots selected at runtime; opt-in AVX-VNNI and AVX-512/VNNI dots are bit-exact on all selected formats and the reduced full route. Live mixed-format timing retains AVX2 as the accepted path |
 | Hy3 forward path | Implemented and reduced-model verified | Exact routing, dense/SwiGLU, routed/shared MoE, RMSNorm, YaRN RoPE, GQA attention, teacher-forced logits |
 | Tokenizer/chat protocol | Implemented and differential-tested | Embedded GPT-2 BPE, exact Hy3 formatting, incremental decode, reasoning, tools, stop tokens, and up to four stop strings |
 | KV and generation | Implemented | Lazy million-token-capable paged KV, deterministic sampling, causal generation, model-bound persistent sessions, transactional rollback |
-| Payload I/O and expert storage | Implemented | Windows positioned reads, sparse allocation detection, direct GGUF experts, verified sidecars, parallel route prefetch |
+| Payload I/O and expert storage | Implemented | Direct GGUF/sidecar reads into lazy aligned generation-stamped cache slots, poison/recycle lifetime tests, parallel route prefetch, and tuner-only buffered/unbuffered IOCP batches |
 | Caching | Implemented | Fixed byte ceilings, pins, deduplicated concurrent loads, hysteretic admission, LRU eviction, atomically persisted heat |
 | Resource safety | Implemented | Conservative startup memory preflight, checked allocation/arithmetic, bounded requests, cancellation between tokens, typed errors |
-| CLI | Implemented | `inspect-gguf`, `doctor`, `plan`, `validate`, `prepare`, `tokenize`, `detokenize`, `chat`, `serve`, `bench`, `cache` |
+| Hardware tuning | Implemented with qualification gates | Versioned hardware/artifact fingerprints, execution policies, bound/unbound persistent CPU worker tuning, 10% backend decisions, storage tuning, profile drift rejection, and Chrome/Perfetto aggregate spans |
+| CLI | Implemented | `inspect-gguf`, `doctor`, `plan`, `validate`, `prepare`, `tokenize`, `detokenize`, `chat`, `serve`, `tune`, `bench`, `cache` |
 | HTTP server | Implemented and route-tested | Health/model/tokenization plus OpenAI-compatible JSON/SSE chat completions, usage chunks, tools/reasoning, body/concurrency bounds |
-| CUDA | Unavailable on selected host | No live NVIDIA device; the CPU path remains functional and CUDA is never advertised |
-| Grouped prefill | Explicitly unavailable | Decode and prompt prefill are exact token-serial operations; no accelerated grouped-prefill claim |
+| CUDA | Explicit streaming model backend implemented, opt-in | `--backend cuda-q8-k` uses runtime-compiled strict-FP32 packed kernels, reusable pinned double staging, batched Q/K/V and MoE projections, and ordered CPU reduction. Reduced full-route output is exact and deterministic; a forced CUDA failure rewinds every KV layer and retries AVX2 atomically. One authenticated full-model prompt preserved `[16883, 0]` and `Hello!`. Resident-spine ownership, asynchronous expert overlap, mixed scheduling, and the multi-prompt qualification corpus remain open |
+| Grouped prefill and T=2 speculation | Implemented, opt-in | Layer-major chunks 2/4/8 use position route unions and one expert load per layer union; reduced logits/KV are exact. CPU-only chunk 8 improved complete time only 1.5%, while the explicit CUDA chunk-8 candidate completed the matching single prompt in 115,482 ms versus about 160,733 ms for its CPU control. Greedy T=2 supports accept, reject/replay, callback rewind, and per-position logits; neither path is automatic without corpus evidence |
 | MTP | Not applicable | The selected checkpoint contains no MTP block |
-| Experimental iGPU | Explicitly unavailable | No experimental placement is advertised |
-| Full-model acceptance | Passed | Exact payload authentication, direct and sidecar generation, llama.cpp b10153 greedy parity, and bounded in-process benchmark completed on 2026-07-29 |
+| Experimental iGPU | Runtime detected, execution unavailable | Vulkan reports the Radeon 890M; no host-visible packed compute backend is compiled or advertised |
+| Ryzen AI NPU | Feasibility reported, execution unavailable | Started AMD NPU is detected; authenticated GGUF conversion is prohibited and only a future advisory router predictor is in scope |
+| Full-model acceptance | Passed | Exact payload authentication, direct and sidecar generation, llama.cpp b10153 greedy parity, and bounded in-process benchmark completed on 2026-07-29. CPU tuning preserved `[16883, 0]` and `Hello!` at 154,056-154,395 ms. The later explicit CUDA chunk-8 candidate also preserved them at 115,482 ms, but remains non-authoritative pending its deterministic multi-prompt corpus |
 
 ## Local verification
 
-The 2026-07-29 checkpoint passes:
+The 2026-07-30 checkpoint passes:
 
 ```text
 cargo fmt --all -- --check
@@ -49,15 +51,26 @@ git diff --check
 
 Current automated evidence:
 
-- **287 tests across 59 suites** pass for the full workspace.
-- **29 release-mode quantization tests** and **10 acceptance-tool unit tests**
+- **326 tests across 63 suites** pass for the full workspace.
+- **34 release-mode quantization tests** and **10 acceptance-tool unit tests**
   pass.
 - Frozen llama.cpp b10153 quantization fixtures remain hash-bound and
   tamper-checked.
 - Reduced two-block Hy3 teacher-forced hidden states, routes, logits,
   probabilities, and greedy IDs match the pinned oracle.
-- Scalar and AVX2/parallel packed execution are bit-identical across all four
-  selected quantized weight types.
+- Scalar, AVX2/parallel, AVX-VNNI, and AVX-512/VNNI packed execution are
+  bit-identical across all four selected quantized weight types; both VNNI
+  reduced full-route logits are bit-identical to scalar Q8_K.
+- The live RTX 4070 runtime compiler/Driver gate emits `compute_89` PTX,
+  completes page-locked asynchronous H2D/kernel/D2H work, and matches the CPU
+  scalar oracle bit-for-bit for 7x1024 GEMV in Q4_K, Q5_K, IQ2_S, and IQ3_S.
+- The reusable CUDA executor preserves atomic caller output, passes two
+  deterministic oracle passes across both staging arenas, and passes
+  1,344x4,096 per-format tuning probes while retaining 1.25 GiB free VRAM.
+- The explicit streaming CUDA backend batches Q/K/V, routed/shared gate/up,
+  and down projections; its reduced-model full route is bit-exact and
+  deterministic. Injected malformed expert data proves output atomicity,
+  complete KV rewind, backend demotion, and a clean AVX2 retry.
 - The real selected header validates 45 metadata values, 1,278 tensors, all
   executable types, the F32 router boundary, tokenizer metadata, and expert
   slab layout.
@@ -128,15 +141,32 @@ the runner cannot emit a passing report from the sparse mirror. Exact timings,
 cache behavior, sidecar hashes, and executable/oracle provenance are recorded
 in [the acceptance summary](full-model-acceptance-2026-07-29.md).
 
-Optional future acceleration does not block the CPU baseline:
+Optional acceleration does not block the CPU baseline:
 
-- CUDA kernels and CPU/GPU scheduling can be enabled and parity-tested if an
-  NVIDIA device becomes live.
-- Grouped multi-token prefill may improve prompt throughput; current prefill
-  is correct and token-serial.
+- The explicit CUDA streaming backend is executable and fail-closed. On the
+  authenticated model, 12 CPU workers, a 512 MiB expert cache, chunk 8, and a
+  4 GiB host reserve produced exact IDs `[16883, 0]` in 115,482 ms: 96,786 ms
+  prefill and 18,693 ms decode. This is about 28% faster than the matching
+  160,733 ms CPU control and about 43% faster than the original 202,981 ms
+  baseline, but the interrupted multi-prompt repeat run is not acceptance
+  evidence. CUDA remains explicit and non-authoritative.
+- The measured CPU/storage tranche improved the accepted prompt by roughly
+  24%, but 0.124–0.129 tok/s remains below the 0.5 tok/s target. Its zero cache
+  hits and 6,775 evictions support replacing the churning 2 GiB default only
+  after a multi-prompt cache-size qualification.
+- Grouped multi-token prefill remains opt-in: chunk 8 reduced live expert loads
+  from 11,376 to 6,777 and prefill from 142,493 ms to 136,733 ms, but total
+  time improved only from 160,733 ms to 158,277 ms. Greedy T=2 n-gram
+  verification still requires its full-model corpus.
+- Any tuning profile produced before the current runtime/CUDA build is stale
+  by construction because profiles bind the executable hash; regenerate it
+  before relying on a policy decision.
 - MTP would require selecting a checkpoint that actually contains an MTP
   block.
-- Experimental iGPU placement remains outside the supported baseline.
+- Vulkan iGPU execution and an advisory NPU router remain research-only.
+
+See [the hardware acceleration status](HARDWARE_ACCELERATION.md) for the exact
+implemented/gated boundary and host-specific commands.
 
 ## Claim boundary
 

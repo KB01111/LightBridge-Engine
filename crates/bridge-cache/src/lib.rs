@@ -5,6 +5,7 @@ use std::error::Error;
 use std::hash::Hash;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
+use bridge_io_windows::ReadSlotLease;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 const HEAT_FORMAT: &str = "lightbridge-cache-heat";
@@ -58,14 +59,57 @@ struct State<K> {
 enum Entry {
     Loading {
         expected_bytes: usize,
+        charge_bytes: usize,
         resident: bool,
     },
     Ready {
-        bytes: Arc<[u8]>,
+        bytes: Arc<CachePayload>,
+        charge_bytes: usize,
         pins: usize,
         last_used: u64,
         resident: bool,
     },
+}
+
+#[derive(Debug)]
+enum CachePayload {
+    Owned(Vec<u8>),
+    ReadSlot { lease: ReadSlotLease, length: usize },
+}
+
+impl CachePayload {
+    fn len(&self) -> usize {
+        match self {
+            Self::Owned(bytes) => bytes.len(),
+            Self::ReadSlot { length, .. } => *length,
+        }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Owned(bytes) => bytes,
+            Self::ReadSlot { lease, length } => &lease.as_slice()[..*length],
+        }
+    }
+
+    fn backing_len(&self) -> usize {
+        match self {
+            Self::Owned(bytes) => bytes.len(),
+            Self::ReadSlot { lease, .. } => lease.as_slice().len(),
+        }
+    }
+
+    fn validate_backing(&self) -> Result<(), CacheError> {
+        match self {
+            Self::ReadSlot { lease, length } if lease.as_slice().len() < *length => {
+                Err(CacheError::BackingTooSmall {
+                    required: *length,
+                    actual: lease.as_slice().len(),
+                })
+            }
+            Self::Owned(_) | Self::ReadSlot { .. } => Ok(()),
+        }
+    }
 }
 
 impl<K> CompressedCache<K>
@@ -136,12 +180,68 @@ where
         E: Error + Send + Sync + 'static,
         F: FnOnce() -> Result<Vec<u8>, E>,
     {
+        self.get_or_try_insert_payload(key, expected_bytes, expected_bytes, || {
+            loader().map(CachePayload::Owned)
+        })
+    }
+
+    /// Loads directly into a reusable aligned read slot. The cache entry and
+    /// its active leases retain the slot; eviction recycles and poisons it.
+    pub fn get_or_try_insert_read_slot<E, F>(
+        &self,
+        key: K,
+        expected_bytes: usize,
+        loader: F,
+    ) -> Result<CacheLease<K>, LoadError<E>>
+    where
+        E: Error + Send + Sync + 'static,
+        F: FnOnce() -> Result<ReadSlotLease, E>,
+    {
+        self.get_or_try_insert_read_slot_charged(key, expected_bytes, expected_bytes, loader)
+    }
+
+    pub fn get_or_try_insert_read_slot_charged<E, F>(
+        &self,
+        key: K,
+        expected_bytes: usize,
+        charge_bytes: usize,
+        loader: F,
+    ) -> Result<CacheLease<K>, LoadError<E>>
+    where
+        E: Error + Send + Sync + 'static,
+        F: FnOnce() -> Result<ReadSlotLease, E>,
+    {
+        self.get_or_try_insert_payload(key, expected_bytes, charge_bytes, || {
+            loader().map(|lease| CachePayload::ReadSlot {
+                lease,
+                length: expected_bytes,
+            })
+        })
+    }
+
+    fn get_or_try_insert_payload<E, F>(
+        &self,
+        key: K,
+        expected_bytes: usize,
+        charge_bytes: usize,
+        loader: F,
+    ) -> Result<CacheLease<K>, LoadError<E>>
+    where
+        E: Error + Send + Sync + 'static,
+        F: FnOnce() -> Result<CachePayload, E>,
+    {
         if expected_bytes == 0 {
             return Err(LoadError::Cache(CacheError::EmptyEntry));
         }
-        if expected_bytes > self.inner.config.capacity_bytes {
+        if charge_bytes < expected_bytes {
+            return Err(LoadError::Cache(CacheError::ChargeTooSmall {
+                payload: expected_bytes,
+                charge: charge_bytes,
+            }));
+        }
+        if charge_bytes > self.inner.config.capacity_bytes {
             return Err(LoadError::Cache(CacheError::EntryTooLarge {
-                requested: expected_bytes,
+                requested: charge_bytes,
                 capacity: self.inner.config.capacity_bytes,
             }));
         }
@@ -187,17 +287,18 @@ where
                         *requests
                     };
                     let resident = requests >= self.inner.config.admit_after_requests;
-                    reserve_capacity(&mut state, self.inner.config.capacity_bytes, expected_bytes)
+                    reserve_capacity(&mut state, self.inner.config.capacity_bytes, charge_bytes)
                         .map_err(LoadError::Cache)?;
                     state.reserved_bytes = state
                         .reserved_bytes
-                        .checked_add(expected_bytes)
+                        .checked_add(charge_bytes)
                         .ok_or(LoadError::Cache(CacheError::ArithmeticOverflow))?;
                     state.loads = state.loads.saturating_add(1);
                     state.entries.insert(
                         key.clone(),
                         Entry::Loading {
                             expected_bytes,
+                            charge_bytes,
                             resident,
                         },
                     );
@@ -207,6 +308,7 @@ where
                         inner: Arc::clone(&self.inner),
                         key: key.clone(),
                         expected_bytes,
+                        charge_bytes,
                         armed: true,
                     };
                     let bytes = loader
@@ -214,29 +316,39 @@ where
                         .expect("loader is consumed only by the reserving caller")(
                     )
                     .map_err(LoadError::Loader)?;
+                    bytes.validate_backing().map_err(LoadError::Cache)?;
                     if bytes.len() != expected_bytes {
                         return Err(LoadError::Cache(CacheError::LoadedSizeMismatch {
                             expected: expected_bytes,
                             actual: bytes.len(),
                         }));
                     }
-                    let bytes: Arc<[u8]> = bytes.into();
+                    if bytes.backing_len() < charge_bytes {
+                        return Err(LoadError::Cache(CacheError::BackingTooSmall {
+                            required: charge_bytes,
+                            actual: bytes.backing_len(),
+                        }));
+                    }
+                    // Preserve either the loader-owned allocation or the
+                    // aligned slot without a slice conversion or byte copy.
+                    let bytes = Arc::new(bytes);
                     let mut state = self.lock().map_err(LoadError::Cache)?;
                     let resident = match state.entries.get(&key) {
                         Some(Entry::Loading {
                             expected_bytes: reserved,
+                            charge_bytes: reserved_charge,
                             resident,
-                        }) if *reserved == expected_bytes => *resident,
+                        }) if *reserved == expected_bytes && *reserved_charge == charge_bytes => *resident,
                         _ => {
                             drop(state);
                             return Err(LoadError::Cache(CacheError::ReservationLost));
                         }
                     };
-                    let Some(reserved_bytes) = state.reserved_bytes.checked_sub(expected_bytes) else {
+                    let Some(reserved_bytes) = state.reserved_bytes.checked_sub(charge_bytes) else {
                         drop(state);
                         return Err(LoadError::Cache(CacheError::ArithmeticOverflow));
                     };
-                    let Some(used_bytes) = state.used_bytes.checked_add(expected_bytes) else {
+                    let Some(used_bytes) = state.used_bytes.checked_add(charge_bytes) else {
                         drop(state);
                         return Err(LoadError::Cache(CacheError::ArithmeticOverflow));
                     };
@@ -247,6 +359,7 @@ where
                         key.clone(),
                         Entry::Ready {
                             bytes: Arc::clone(&bytes),
+                            charge_bytes,
                             pins: 1,
                             last_used: tick,
                             resident,
@@ -310,10 +423,10 @@ where
             .collect::<Vec<_>>();
         let mut removed = 0;
         for key in keys {
-            if let Some(Entry::Ready { bytes, .. }) = state.entries.remove(&key) {
+            if let Some(Entry::Ready { charge_bytes, .. }) = state.entries.remove(&key) {
                 state.used_bytes = state
                     .used_bytes
-                    .checked_sub(bytes.len())
+                    .checked_sub(charge_bytes)
                     .ok_or(CacheError::ArithmeticOverflow)?;
                 removed += 1;
             }
@@ -400,7 +513,7 @@ where
 {
     inner: Arc<Inner<K>>,
     key: K,
-    bytes: Arc<[u8]>,
+    bytes: Arc<CachePayload>,
 }
 
 impl<K> CacheLease<K>
@@ -408,7 +521,7 @@ where
     K: Clone + Eq + Hash,
 {
     pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+        self.bytes.bytes()
     }
 
     pub fn key(&self) -> &K {
@@ -434,8 +547,8 @@ where
             _ => false,
         };
         if remove_ephemeral {
-            if let Some(Entry::Ready { bytes, .. }) = state.entries.remove(&self.key) {
-                state.used_bytes = state.used_bytes.saturating_sub(bytes.len());
+            if let Some(Entry::Ready { charge_bytes, .. }) = state.entries.remove(&self.key) {
+                state.used_bytes = state.used_bytes.saturating_sub(charge_bytes);
             }
         }
         self.inner.changed.notify_all();
@@ -449,6 +562,7 @@ where
     inner: Arc<Inner<K>>,
     key: K,
     expected_bytes: usize,
+    charge_bytes: usize,
     armed: bool,
 }
 
@@ -467,11 +581,15 @@ where
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let matches = matches!(
             state.entries.get(&self.key),
-            Some(Entry::Loading { expected_bytes, .. }) if *expected_bytes == self.expected_bytes
+            Some(Entry::Loading {
+                expected_bytes,
+                charge_bytes,
+                ..
+            }) if *expected_bytes == self.expected_bytes && *charge_bytes == self.charge_bytes
         );
         if matches {
             state.entries.remove(&self.key);
-            state.reserved_bytes = state.reserved_bytes.saturating_sub(self.expected_bytes);
+            state.reserved_bytes = state.reserved_bytes.saturating_sub(self.charge_bytes);
         }
         self.inner.changed.notify_all();
     }
@@ -503,10 +621,14 @@ pub enum CacheError {
     EmptyEntry,
     #[error("entry needs {requested} bytes but cache capacity is {capacity}")]
     EntryTooLarge { requested: usize, capacity: usize },
+    #[error("cache charge {charge} bytes is smaller than payload {payload} bytes")]
+    ChargeTooSmall { payload: usize, charge: usize },
     #[error("cache cannot reserve {requested} bytes because resident or in-flight entries are pinned")]
     CapacityPinned { requested: usize },
     #[error("loader returned {actual} bytes, expected exactly {expected}")]
     LoadedSizeMismatch { expected: usize, actual: usize },
+    #[error("cache payload backing is {actual} bytes, required {required}")]
+    BackingTooSmall { required: usize, actual: usize },
     #[error("cache load reservation disappeared before completion")]
     ReservationLost,
     #[error("cache synchronization state is poisoned")]
@@ -584,10 +706,10 @@ where
         let Some(candidate) = candidate else {
             return Err(CacheError::CapacityPinned { requested });
         };
-        if let Some(Entry::Ready { bytes, .. }) = state.entries.remove(&candidate) {
+        if let Some(Entry::Ready { charge_bytes, .. }) = state.entries.remove(&candidate) {
             state.used_bytes = state
                 .used_bytes
-                .checked_sub(bytes.len())
+                .checked_sub(charge_bytes)
                 .ok_or(CacheError::ArithmeticOverflow)?;
             state.evictions = state.evictions.saturating_add(1);
         }

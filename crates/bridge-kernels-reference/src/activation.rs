@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::gemv::{gemv_accumulate_scaled_into, gemv_into, validate_finite_value};
+use crate::gemv::{gemv_accumulate_scaled_into, gemv_into, gemv_pair_into, validate_finite_value};
 use crate::{KernelError, PackedMatrix, ReferenceExecutionMode};
 
 #[derive(Debug, Clone, Copy)]
@@ -74,19 +74,11 @@ pub fn swiglu_project_into(
     let (gate_values, remainder) = scratch.activation.split_at_mut(hidden);
     let up_values = &mut remainder[..hidden];
 
-    gemv_into(
+    gemv_pair_into(
         mode,
-        expert.gate(),
+        [expert.gate(), expert.up()],
         input,
-        gate_values,
-        scratch.decoded_block,
-        scratch.q8,
-    )?;
-    gemv_into(
-        mode,
-        expert.up(),
-        input,
-        up_values,
+        [gate_values, up_values],
         scratch.decoded_block,
         scratch.q8,
     )?;
@@ -115,19 +107,11 @@ pub fn expert_swiglu_accumulate_into(
     let (gate_values, remainder) = scratch.activation.split_at_mut(hidden);
     let up_values = &mut remainder[..hidden];
 
-    gemv_into(
+    gemv_pair_into(
         mode,
-        expert.gate(),
+        [expert.gate(), expert.up()],
         input,
-        gate_values,
-        scratch.decoded_block,
-        scratch.q8,
-    )?;
-    gemv_into(
-        mode,
-        expert.up(),
-        input,
-        up_values,
+        [gate_values, up_values],
         scratch.decoded_block,
         scratch.q8,
     )?;
@@ -167,7 +151,7 @@ fn validate_expert_call(
     Ok(())
 }
 
-fn apply_swiglu(gate: &mut [f32], up: &[f32]) -> Result<()> {
+pub(crate) fn apply_swiglu(gate: &mut [f32], up: &[f32]) -> Result<()> {
     for (index, (gate_value, &up_value)) in gate.iter_mut().zip(up).enumerate() {
         let activated = *gate_value / (1.0_f32 + (-*gate_value).exp());
         let value = activated * up_value;

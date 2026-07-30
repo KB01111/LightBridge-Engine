@@ -72,6 +72,19 @@ fn direct_index_and_reads_use_exact_validated_expert_slabs() {
     assert_eq!(bytes.gate.len() as u64, record.gate.length());
     assert_eq!(bytes.up.len() as u64, record.up.length());
     assert_eq!(bytes.down.len() as u64, record.down.length());
+
+    let mut direct_into = vec![0_u8; bytes.gate.len() + bytes.up.len() + bytes.down.len()];
+    store
+        .read_expert_into(key, &mut direct_into, &ReadCancellation::new())
+        .unwrap();
+    assert_eq!(
+        direct_into,
+        [bytes.gate.as_slice(), bytes.up.as_slice(), bytes.down.as_slice()].concat()
+    );
+    let short_length = direct_into.len() - 1;
+    assert!(store
+        .read_expert_into(key, &mut direct_into[..short_length], &ReadCancellation::new())
+        .is_err());
 }
 
 #[test]
@@ -111,6 +124,21 @@ fn both_sidecar_layouts_are_lossless_and_source_bound() {
             assert_expert_equal(
                 &direct.read_expert(key, &ReadCancellation::new()).unwrap(),
                 &sidecar.read_expert(key, &ReadCancellation::new()).unwrap(),
+            );
+            let direct_bytes = direct.read_expert(key, &ReadCancellation::new()).unwrap();
+            let mut tight =
+                vec![0_u8; direct_bytes.gate.len() + direct_bytes.up.len() + direct_bytes.down.len()];
+            sidecar
+                .read_expert_into(key, &mut tight, &ReadCancellation::new())
+                .unwrap();
+            assert_eq!(
+                tight,
+                [
+                    direct_bytes.gate.as_slice(),
+                    direct_bytes.up.as_slice(),
+                    direct_bytes.down.as_slice()
+                ]
+                .concat()
             );
         }
     }
