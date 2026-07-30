@@ -306,6 +306,20 @@ impl Sidecar {
         &self.manifest
     }
 
+    /// Reads the packed bytes for an expert and provides ranges for its gate, up, and down segments.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # let sidecar: Sidecar = todo!();
+    /// # let cancellation: ReadCancellation = todo!();
+    /// let expert = sidecar.read_expert(
+    ///     ExpertKey { layer: 0, expert: 0 },
+    ///     &cancellation,
+    /// )?;
+    /// assert!(!expert.record_bytes().is_empty());
+    /// # Ok::<(), SidecarError>(())
+    /// ```
     pub fn read_expert(
         &self,
         key: ExpertKey,
@@ -324,8 +338,29 @@ impl Sidecar {
         })
     }
 
-    /// Reads the three packed expert segments directly into their final tight
-    /// destination, skipping the record-sized allocation and compaction copy.
+    /// Reads an expert's gate, up, and down segments directly into a tightly packed buffer.
+    ///
+    /// The output buffer must contain exactly enough space for the three segments in gate,
+    /// up, down order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the expert is missing, the output length is incorrect, or a
+    /// segment read fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let mut output = vec![0; expected_expert_size];
+    /// sidecar.read_expert_into(key, &mut output, &cancellation)?;
+    /// # Ok::<(), SidecarError>(())
+    /// ```
+    ///
+    /// # Parameters
+    ///
+    /// * `key` - Identifies the expert to read.
+    /// * `output` - Destination buffer for the packed segment bytes.
+    /// * `cancellation` - Controls cancellation during I/O.
     pub fn read_expert_into(
         &self,
         key: ExpertKey,
@@ -361,6 +396,19 @@ impl Sidecar {
         Ok(())
     }
 
+    /// Verifies that the sidecar data matches the SHA-256 digest recorded in its manifest.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn verify(
+    /// #     sidecar: &Sidecar,
+    /// #     cancellation: &ReadCancellation,
+    /// # ) -> Result<(), SidecarError> {
+    /// sidecar.verify_data_hash(cancellation)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn verify_data_hash(&self, cancellation: &ReadCancellation) -> Result<(), SidecarError> {
         let mut hasher = Sha256::new();
         let chunk_size = self.data.limits().max_request_bytes.min(8 * 1024 * 1024);

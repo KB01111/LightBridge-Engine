@@ -66,6 +66,21 @@ pub fn moe_selected_into(
     Ok(())
 }
 
+/// Executes the CUDA Q8_K batched path for routed and shared SwiGLU experts,
+/// accumulating their weighted outputs into the candidate buffer.
+///
+/// # Examples
+///
+/// ```no_run
+/// cuda_moe_selected_into(&routed, shared, input, &mut candidate, &mut scratch)?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the batch exceeds the CUDA limit, scratch capacity is
+/// insufficient, quantization or CUDA execution fails, arithmetic overflows, or
+/// an intermediate result is not finite.
 fn cuda_moe_selected_into(
     routed: &[SelectedExpert<'_>],
     shared: SwiGluExpert<'_>,
@@ -240,8 +255,29 @@ fn cuda_moe_selected_into(
     Ok(())
 }
 
-/// Executes routed experts selected by ID without constructing a temporary
-/// borrowed expert list. This is the hot-path form used by the complete layer.
+/// Executes routed experts selected by ID and accumulates their results with the shared expert.
+///
+/// Routed expert IDs must be strictly increasing and identify available experts. The completed
+/// result is validated before it is copied into `output`.
+///
+/// # Examples
+///
+/// ```ignore
+/// moe_routed_by_id_into(
+///     mode,
+///     selection,
+///     input,
+///     output,
+///     candidate_output_scratch,
+///     scratch,
+/// )?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the selection, dimensions, scratch buffers, coefficients, or computed
+/// output are invalid.
 pub fn moe_routed_by_id_into(
     mode: ReferenceExecutionMode,
     selection: RoutedMoeSelection<'_>,
@@ -316,6 +352,24 @@ pub fn moe_routed_by_id_into(
     Ok(())
 }
 
+/// Validates the structure and dimensions required for routed and shared MoE execution.
+///
+/// Routed experts must be present, ordered by strictly increasing identifier, and have
+/// unique identifiers and finite coefficients. The input, output, and candidate scratch
+/// buffer must also have compatible dimensions.
+///
+/// # Examples
+///
+/// ```ignore
+/// let result = validate_structure(
+///     &routed,
+///     shared,
+///     &input,
+///     &output,
+///     &candidate_output_scratch,
+/// );
+/// assert!(result.is_ok());
+/// ```
 fn validate_structure(
     routed: &[SelectedExpert<'_>],
     shared: SwiGluExpert<'_>,

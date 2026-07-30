@@ -29,6 +29,32 @@ pub struct HardwareFingerprintV1 {
 }
 
 impl HardwareFingerprintV1 {
+    /// Validates the hardware fingerprint's version and required identifying fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the version is unsupported, a required field is empty,
+    /// or the logical processor count is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let fingerprint = HardwareFingerprintV1 {
+    ///     version: HARDWARE_FINGERPRINT_VERSION,
+    ///     engine_build: "engine".into(),
+    ///     operating_system: "linux".into(),
+    ///     architecture: "x86_64".into(),
+    ///     cpu_signature: "cpu".into(),
+    ///     logical_processors: 8,
+    ///     memory_bytes: 0,
+    ///     devices: Vec::new(),
+    ///     power_state: "active".into(),
+    ///     pcie_links: Vec::new(),
+    ///     runtimes: Vec::new(),
+    /// };
+    ///
+    /// assert!(fingerprint.validate().is_ok());
+    /// ```
     pub fn validate(&self) -> Result<(), ProfileError> {
         if self.version != HARDWARE_FINGERPRINT_VERSION {
             return Err(ProfileError::HardwareVersion {
@@ -47,6 +73,21 @@ impl HardwareFingerprintV1 {
         Ok(())
     }
 
+    /// Computes the lowercase hexadecimal SHA-256 digest of the validated hardware fingerprint.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ProfileError`] if the fingerprint is invalid or cannot be serialized.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn example(fingerprint: &HardwareFingerprintV1) -> Result<(), ProfileError> {
+    /// let digest = fingerprint.digest()?;
+    /// assert_eq!(digest.len(), 64);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn digest(&self) -> Result<String, ProfileError> {
         self.validate()?;
         let encoded = serde_json::to_vec(self).map_err(ProfileError::Json)?;
@@ -72,6 +113,29 @@ pub struct ArtifactFingerprint {
 }
 
 impl ArtifactFingerprint {
+    /// Validates the artifact path and SHA-256 digest using the specified field name for errors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let fingerprint = ArtifactFingerprint {
+    ///     canonical_path: "/models/model.bin".to_string(),
+    ///     length: 0,
+    ///     sha256: "a".repeat(64),
+    /// };
+    ///
+    /// assert!(fingerprint.validate("model").is_ok());
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns `ProfileError::EmptyField` when the canonical path is empty or
+    /// `ProfileError::Sha256` when the digest is not a lowercase hexadecimal
+    /// SHA-256 value.
+    ///
+    /// # Arguments
+    ///
+    /// * `field` - Name of the artifact field used in validation errors.
     fn validate(&self, field: &'static str) -> Result<(), ProfileError> {
         require_non_empty(field, &self.canonical_path)?;
         validate_sha256(field, &self.sha256)
@@ -128,6 +192,16 @@ pub struct ExecutionPolicy {
 }
 
 impl Default for ExecutionPolicy {
+    /// Creates an execution policy with the default backend, storage, threading, and resource settings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let policy = ExecutionPolicy::default();
+    /// assert_eq!(policy.cpu_threads, 1);
+    /// assert_eq!(policy.authoritative_backend, BackendKind::CpuAvx2);
+    /// assert_eq!(policy.fallback_backend, BackendKind::CpuScalar);
+    /// ```
     fn default() -> Self {
         Self {
             authoritative_backend: BackendKind::CpuAvx2,
@@ -155,6 +229,14 @@ impl Default for ExecutionPolicy {
 }
 
 impl ExecutionPolicy {
+    /// Validates the execution policy's worker, storage, prefill, speculation, and improvement settings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let policy = ExecutionPolicy::default();
+    /// assert!(policy.validate().is_ok());
+    /// ```
     pub fn validate(&self) -> Result<(), ProfileError> {
         if self.cpu_threads == 0 {
             return Err(ProfileError::InvalidPolicy("CPU threads must be non-zero"));
@@ -207,6 +289,22 @@ pub struct CorrectnessEvidence {
 }
 
 impl CorrectnessEvidence {
+    /// Determines whether the correctness evidence satisfies all required checks and error thresholds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let evidence = CorrectnessEvidence {
+    ///     packed_dot_oracle: true,
+    ///     routes_match: true,
+    ///     greedy_tokens_match: true,
+    ///     deterministic_repeats: true,
+    ///     maximum_absolute_logit_error: 1.0e-4,
+    ///     maximum_relative_logit_error: 1.0e-5,
+    /// };
+    ///
+    /// assert!(evidence.passes());
+    /// ```
     pub fn passes(&self) -> bool {
         self.packed_dot_oracle
             && self.routes_match
@@ -230,6 +328,34 @@ pub struct BackendDecision {
 }
 
 impl BackendDecision {
+    /// Creates a backend decision from measured performance and correctness evidence.
+    ///
+    /// The decision is automatic only when the backend is authoritative, correctness
+    /// evidence passes, and the measured improvement meets the required threshold.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let decision = BackendDecision::measured(
+    ///     BackendKind::CpuAvx2,
+    ///     true,
+    ///     90,
+    ///     100,
+    ///     CorrectnessEvidence::default(),
+    ///     1_000,
+    /// );
+    /// assert_eq!(decision.backend, BackendKind::CpuAvx2);
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// A decision containing the measured timings, improvement, correctness
+    /// evidence, automatic-selection status, and an explanatory reason.
+    ///
+    /// # Parameters
+    ///
+    /// * `authoritative` determines whether the backend may be selected automatically.
+    /// * `minimum_improvement_bps` is the minimum required performance improvement in basis points.
     pub fn measured(
         backend: BackendKind,
         authoritative: bool,
@@ -271,6 +397,19 @@ impl BackendDecision {
         }
     }
 
+    /// Creates a backend decision indicating that the candidate was rejected.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let decision = BackendDecision::rejected(
+    ///     BackendKind::CpuScalar,
+    ///     true,
+    ///     "insufficient performance improvement",
+    /// );
+    /// assert!(!decision.automatic);
+    /// assert_eq!(decision.reason, "insufficient performance improvement");
+    /// ```
     pub fn rejected(backend: BackendKind, authoritative: bool, reason: impl Into<String>) -> Self {
         Self {
             backend,
@@ -296,6 +435,30 @@ pub struct TuningMeasurement {
 }
 
 impl TuningMeasurement {
+    /// Creates a tuning measurement from a collection of sample durations.
+    ///
+    /// The samples are stored as nanoseconds, and the median is selected from the
+    /// sorted samples. An empty sample collection is rejected.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProfileError::EmptyMeasurement`] when `samples` is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// let measurement = TuningMeasurement::new(
+    ///     "inference",
+    ///     None,
+    ///     vec![Duration::from_nanos(30), Duration::from_nanos(10), Duration::from_nanos(20)],
+    ///     None,
+    ///     "sample measurement",
+    /// ).unwrap();
+    ///
+    /// assert_eq!(measurement.median_ns, 20);
+    /// ```
     pub fn new(
         name: impl Into<String>,
         backend: Option<BackendKind>,
@@ -346,6 +509,33 @@ pub struct CandidateRejection {
 }
 
 impl TuningProfileV1 {
+    /// Creates and validates a tuning profile with the supplied hardware, artifacts, policy, measurements, and backend decisions.
+    ///
+    /// The profile receives the current format and schema versions, computes the hardware fingerprint digest, and starts with no candidate rejections.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProfileError`] if the hardware fingerprint, artifact fingerprints, execution policy, or resulting profile is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # let profile_name = "default";
+    /// # let hardware: HardwareFingerprintV1 = todo!();
+    /// # let model: ArtifactFingerprint = todo!();
+    /// # let policy = ExecutionPolicy::default();
+    /// let profile = TuningProfileV1::new(
+    ///     profile_name,
+    ///     hardware,
+    ///     model,
+    ///     None,
+    ///     policy,
+    ///     vec![],
+    ///     vec![],
+    /// )?;
+    /// # let _: TuningProfileV1 = profile;
+    /// # Ok::<(), ProfileError>(())
+    /// ```
     pub fn new(
         profile: impl Into<String>,
         hardware: HardwareFingerprintV1,
@@ -373,6 +563,22 @@ impl TuningProfileV1 {
         Ok(value)
     }
 
+    /// Validates the profile format, version, fingerprints, and execution policy.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bridge_scheduler::TuningProfileV1;
+    ///
+    /// fn check_profile(profile: &TuningProfileV1) {
+    ///     assert!(profile.validate().is_ok());
+    /// }
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the profile is valid; otherwise, the validation error.
+    ///
     pub fn validate(&self) -> Result<(), ProfileError> {
         if self.format != TUNING_PROFILE_FORMAT {
             return Err(ProfileError::Format(self.format.clone()));
@@ -399,6 +605,25 @@ impl TuningProfileV1 {
         self.policy.validate()
     }
 
+    /// Verifies that the profile remains valid for the current hardware and artifacts.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ProfileError::Drift`] if the hardware, model, or optional sidecar
+    /// differs from the profile, or propagates validation and digest errors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn example(
+    /// #     profile: &TuningProfileV1,
+    /// #     hardware: &HardwareFingerprintV1,
+    /// #     model: &ArtifactFingerprint,
+    /// # ) -> Result<(), ProfileError> {
+    /// profile.validate_current(hardware, model, None)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn validate_current(
         &self,
         hardware: &HardwareFingerprintV1,
@@ -429,6 +654,15 @@ pub struct ChromeTrace {
 }
 
 impl Default for ChromeTrace {
+    /// Creates an empty Chrome trace with millisecond display units.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let trace = ChromeTrace::default();
+    /// assert!(trace.trace_events.is_empty());
+    /// assert_eq!(trace.display_time_unit, "ms");
+    /// ```
     fn default() -> Self {
         Self {
             trace_events: Vec::new(),
@@ -450,6 +684,26 @@ pub struct TraceEvent {
 }
 
 impl ChromeTrace {
+    /// Records a complete Chrome trace event with microsecond timestamps and duration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// let mut trace = ChromeTrace::default();
+    /// trace.push_complete(
+    ///     "inference",
+    ///     "scheduler",
+    ///     Duration::from_millis(10),
+    ///     Duration::from_millis(5),
+    ///     std::collections::BTreeMap::new(),
+    /// );
+    ///
+    /// assert_eq!(trace.trace_events[0].ph, "X");
+    /// assert_eq!(trace.trace_events[0].ts, 10_000);
+    /// assert_eq!(trace.trace_events[0].dur, 5_000);
+    /// ```
     pub fn push_complete(
         &mut self,
         name: impl Into<String>,
@@ -471,6 +725,17 @@ impl ChromeTrace {
     }
 }
 
+/// Calculates the candidate's improvement over a reference duration in basis points.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(improvement_bps(900, 1_000), Some(1_000));
+/// assert_eq!(improvement_bps(1_100, 1_000), Some(0));
+/// ```
+///
+/// Returns `None` if the calculated value cannot be represented as `u32`.
+fn improvement_bps(candidate_ns: u64, reference_ns: u64) -> Option<u32>
 fn improvement_bps(candidate_ns: u64, reference_ns: u64) -> Option<u32> {
     if reference_ns == 0 || candidate_ns >= reference_ns {
         return Some(0);
@@ -480,10 +745,35 @@ fn improvement_bps(candidate_ns: u64, reference_ns: u64) -> Option<u32> {
     u32::try_from(basis_points).ok()
 }
 
+/// Converts a duration to microseconds, saturating at `u64::MAX` when the value does not fit.
+
+///
+
+/// # Examples
+
+///
+
+/// ```
+
+/// use std::time::Duration;
+
+///
+
+/// assert_eq!(micros(Duration::from_micros(42)), 42);
+
+/// ```
 fn micros(duration: Duration) -> u64 {
     u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
 }
 
+/// Validates that a required string contains at least one non-whitespace character.
+///
+/// # Examples
+///
+/// ```
+/// assert!(require_non_empty("name", "profile").is_ok());
+/// assert!(require_non_empty("name", "  ").is_err());
+/// ```
 fn require_non_empty(field: &'static str, value: &str) -> Result<(), ProfileError> {
     if value.trim().is_empty() {
         Err(ProfileError::EmptyField(field))
@@ -492,6 +782,19 @@ fn require_non_empty(field: &'static str, value: &str) -> Result<(), ProfileErro
     }
 }
 
+/// Validates that a value is a 64-character lowercase hexadecimal SHA-256 digest.
+///
+/// # Examples
+///
+/// ```
+/// assert!(validate_sha256("digest", &"a".repeat(64)).is_ok());
+/// assert!(validate_sha256("digest", "invalid").is_err());
+/// ```
+///
+/// # Arguments
+///
+/// * `field` - Field name included in the validation error.
+/// * `value` - Digest value to validate.
 fn validate_sha256(field: &'static str, value: &str) -> Result<(), ProfileError> {
     if value.len() == 64
         && value

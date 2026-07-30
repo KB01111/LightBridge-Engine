@@ -7,6 +7,14 @@ use std::sync::{
 use bridge_cache::{CacheConfig, CacheError, CompressedCache, LoadError};
 use bridge_io_windows::ReadSlotPool;
 
+/// Creates a compressed cache with the specified capacity and admission threshold.
+///
+/// # Examples
+///
+/// ```
+/// let _cache = cache(8, 1);
+/// ```
+fn?
 fn cache(capacity_bytes: usize, admit_after_requests: u64) -> CompressedCache<u32> {
     CompressedCache::new(CacheConfig {
         capacity_bytes,

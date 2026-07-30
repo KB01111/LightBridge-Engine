@@ -1,7 +1,18 @@
 #include <cuda_runtime_api.h>
 #include <stdint.h>
 
-extern "C" int bridge_cuda_canary_v1(
+extern "C" /**
+ * @brief Reports compute capability and global memory for the first CUDA device.
+ *
+ * @param abi_version ABI version, which must be 1.
+ * @param major Receives the device compute capability major version.
+ * @param minor Receives the device compute capability minor version.
+ * @param global_memory_bytes Receives the device's total global memory in bytes.
+ * @return CUDA-style status code, including `cudaSuccess` on success,
+ *         `cudaErrorInvalidValue` for invalid arguments, or
+ *         `cudaErrorNoDevice` when no CUDA device is available.
+ */
+int bridge_cuda_canary_v1(
     uint32_t abi_version,
     int *major,
     int *minor,

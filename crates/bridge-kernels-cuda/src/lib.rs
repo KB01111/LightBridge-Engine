@@ -33,6 +33,18 @@ pub struct CudaBuildCapabilities {
     pub rejection_reason: Option<String>,
 }
 
+/// Describes the CUDA components compiled into the current build and its target configuration.
+///
+/// # Examples
+///
+/// ```
+/// let capabilities = build_capabilities();
+/// assert_eq!(capabilities.abi_version, CUDA_KERNEL_ABI_VERSION);
+/// assert_eq!(capabilities.target_architecture, CUDA_TARGET_ARCHITECTURE);
+/// assert_eq!(capabilities.ptx_fallback, CUDA_PTX_FALLBACK);
+/// assert!(capabilities.rejection_reason.is_some());
+/// ```
+pub fn build_capabilities() -> CudaBuildCapabilities {
 pub fn build_capabilities() -> CudaBuildCapabilities {
     let native_canary_compiled = cfg!(feature = "cuda-native");
     CudaBuildCapabilities {
@@ -69,7 +81,21 @@ pub struct CudaRuntimeCanary {
     pub global_memory_bytes: u64,
 }
 
-#[cfg(feature = "cuda-native")]
+/// Queries the CUDA device for its compute capability and global memory size.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let canary = runtime_canary();
+    /// if let Ok(canary) = canary {
+    ///     println!(
+    ///         "CUDA compute capability {}.{}, {} bytes of global memory",
+    ///         canary.compute_major, canary.compute_minor, canary.global_memory_bytes
+    ///     );
+    /// }
+    /// ```
+    ///
+    /// Returns the device information on success, or the CUDA bridge status code when the query fails.
 pub fn runtime_canary() -> Result<CudaRuntimeCanary, i32> {
     unsafe extern "C" {
         fn bridge_cuda_canary_v1(
@@ -102,6 +128,19 @@ pub fn runtime_canary() -> Result<CudaRuntimeCanary, i32> {
 }
 
 #[cfg(not(feature = "cuda-native"))]
+/// Reports that the CUDA runtime canary is unavailable in this build.
+
+///
+
+/// # Examples
+
+///
+
+/// ```
+
+/// assert_eq!(runtime_canary(), Err(-1));
+
+/// ```
 pub fn runtime_canary() -> Result<CudaRuntimeCanary, i32> {
     Err(-1)
 }
@@ -115,6 +154,21 @@ pub struct CudaArenaConfig {
 }
 
 impl CudaArenaConfig {
+    /// Validates the CUDA memory arena configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let config = CudaArenaConfig {
+    ///     pinned_read_slots: 2,
+    ///     device_staging_arenas: 2,
+    ///     slot_bytes: 4096,
+    ///     reserved_vram_bytes: 1_280 * 1024 * 1024,
+    /// };
+    ///
+    /// assert!(config.validate().is_ok());
+    /// ```
+    pub fn validate(self) -> Result<(), &'static str>
     pub fn validate(self) -> Result<(), &'static str> {
         if self.pinned_read_slots == 0 || self.device_staging_arenas != 2 || self.slot_bytes == 0 {
             return Err(

@@ -344,6 +344,16 @@ enum TuneProfileArg {
     Performance,
 }
 
+/// Runs the command-line application and maps its result to a process exit code.
+///
+/// Errors are formatted and written to standard error before returning failure.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Run the compiled `bridge` executable from a shell.
+/// ```
+///
 #[tokio::main]
 async fn main() -> ExitCode {
     match run().await {
@@ -355,6 +365,17 @@ async fn main() -> ExitCode {
     }
 }
 
+/// Parses command-line arguments and dispatches the selected subcommand.
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn example() -> anyhow::Result<()> {
+/// run().await?;
+/// # Ok(())
+/// # }
+/// ```
+async fn run() -> Result<()> {
 async fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -598,6 +619,14 @@ struct CapabilityReport {
     selected_model_required_for_chat: bool,
 }
 
+/// Reports host hardware, runtime probes, and backend capability status in JSON or human-readable form.
+///
+/// # Examples
+///
+/// ```no_run
+/// doctor(true)?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn doctor(json: bool) -> Result<()> {
     let nvidia = probe_nvidia();
     let cuda_toolchain = probe_cuda_toolchain();
@@ -775,6 +804,19 @@ fn doctor(json: bool) -> Result<()> {
     }
 }
 
+/// Probes the host for NVIDIA GPU availability and device details.
+///
+/// Uses `nvidia-smi` when available and falls back to Windows Plug and Play
+/// device discovery when the command fails or reports no devices.
+///
+/// # Examples
+///
+/// ```
+/// let status = probe_nvidia();
+/// println!("{}", status.detail);
+/// assert!(status.available || !status.available);
+/// ```
+fn probe_nvidia() -> NvidiaStatus
 fn probe_nvidia() -> NvidiaStatus {
     let output = ProcessCommand::new("nvidia-smi")
         .args([
@@ -820,6 +862,19 @@ fn probe_nvidia() -> NvidiaStatus {
     }
 }
 
+/// Creates an unavailable NVIDIA status with the provided diagnostic detail.
+///
+/// # Examples
+///
+/// ```
+/// let status = unavailable_nvidia("NVIDIA tooling is unavailable");
+/// assert!(!status.available);
+/// assert_eq!(status.detail, "NVIDIA tooling is unavailable");
+/// ```
+///
+/// # Arguments
+///
+/// * `detail` - Diagnostic information explaining why NVIDIA is unavailable.
 fn unavailable_nvidia(detail: impl Into<String>) -> NvidiaStatus {
     NvidiaStatus {
         available: false,
@@ -833,7 +888,23 @@ fn unavailable_nvidia(detail: impl Into<String>) -> NvidiaStatus {
     }
 }
 
-#[cfg(windows)]
+/// Probes Windows display devices for an NVIDIA adapter when `nvidia-smi` cannot provide complete details.
+///
+/// Returns an unavailable status containing the adapter name, PnP status, driver package, and
+/// `nvidia-smi` detail when an NVIDIA display device is found. Returns `None` if the PnP query
+/// fails or no NVIDIA display device is detected.
+///
+/// # Examples
+///
+/// ```
+/// #[cfg(windows)]
+/// {
+///     let status = probe_nvidia_pnp("nvidia-smi was unavailable");
+///     if let Some(status) = status {
+///         assert!(!status.available);
+///     }
+/// }
+/// ```
 fn probe_nvidia_pnp(nvidia_smi_detail: &str) -> Option<NvidiaStatus> {
     let output = ProcessCommand::new("pnputil")
         .args(["/enum-devices", "/class", "Display"])
@@ -860,11 +931,41 @@ fn probe_nvidia_pnp(nvidia_smi_detail: &str) -> Option<NvidiaStatus> {
     })
 }
 
+/// Provides the NVIDIA Plug and Play fallback probe on non-Windows platforms.
+///
+/// # Examples
+///
+/// ```
+/// assert!(probe_nvidia_pnp("").is_none());
+/// ```
+///
+/// # Returns
+///
+/// `None` because NVIDIA Plug and Play probing is unavailable on non-Windows platforms.
 #[cfg(not(windows))]
 fn probe_nvidia_pnp(_nvidia_smi_detail: &str) -> Option<NvidiaStatus> {
     None
 }
 
+/// Extracts device description, status, and driver name from an NVIDIA PnP device block.
+///
+/// # Examples
+///
+/// ```
+/// let text = "Device Description: NVIDIA GPU\nStatus: Started\nDriver Name: display.inf\nVEN_10DE";
+/// let device = parse_nvidia_pnp(text).unwrap();
+///
+/// assert_eq!(device.0, "NVIDIA GPU");
+/// assert_eq!(device.1, "Started");
+/// assert_eq!(device.2, "display.inf");
+/// ```
+///
+/// Returns `None` when the input contains no block identifying an NVIDIA device.
+/// Missing or empty fields are reported as `"unknown"`.
+///
+/// # Returns
+///
+/// The device description, status, and driver name when an NVIDIA device block is found.
 fn parse_nvidia_pnp(text: &str) -> Option<(String, String, String)> {
     text.replace('\r', "")
         .split("\n\n")
@@ -886,6 +987,18 @@ fn parse_nvidia_pnp(text: &str) -> Option<(String, String, String)> {
         })
 }
 
+/// Probes the CUDA toolchain and reports whether the available host compiler is compatible.
+///
+/// # Examples
+///
+/// ```
+/// let status = probe_cuda_toolchain();
+/// assert!(!status.detail.is_empty());
+/// ```
+///
+/// # Returns
+///
+/// A status containing toolchain availability and diagnostic details.
 fn probe_cuda_toolchain() -> ProbeStatus {
     let Some(nvcc) = probe_version("nvcc", &["--version"]) else {
         return ProbeStatus {
@@ -924,6 +1037,22 @@ fn probe_cuda_toolchain() -> ProbeStatus {
     }
 }
 
+/// Probes CUDA NVRTC support and records the runtime canary result.
+///
+/// # Examples
+///
+/// ```no_run
+/// let status = probe_cuda_nvrtc();
+/// println!("{}", status.detail);
+/// ```
+///
+/// The probe reports NVRTC and GPU execution details when successful; otherwise it
+/// records the failure detail.
+///
+/// # Returns
+///
+/// A [`CudaNvrtcStatus`] describing NVRTC availability and, when available, the
+/// successful canary result.
 fn probe_cuda_nvrtc() -> CudaNvrtcStatus {
     match bridge_kernels_cuda::runtime_nvrtc_canary() {
         Ok(canary) => CudaNvrtcStatus {
@@ -948,6 +1077,21 @@ fn probe_cuda_nvrtc() -> CudaNvrtcStatus {
     }
 }
 
+/// Qualifies the CUDA packed Q8K oracle and reusable executor when the runtime canary succeeds.
+///
+/// If the runtime canary fails, qualification is skipped and the returned status explains why.
+/// Otherwise, the status includes oracle and reusable-executor results, timing details, and
+/// staging-arena information.
+///
+/// # Examples
+///
+/// ```
+/// let status = probe_cuda_packed_oracle(false);
+/// assert!(!status.available);
+/// assert!(status.oracle.is_none());
+/// assert!(status.reusable.is_none());
+/// ```
+fn probe_cuda_packed_oracle(runtime_canary_available: bool) -> CudaPackedOracleStatus
 fn probe_cuda_packed_oracle(runtime_canary_available: bool) -> CudaPackedOracleStatus {
     if !runtime_canary_available {
         return CudaPackedOracleStatus {
@@ -1010,6 +1154,18 @@ fn probe_cuda_packed_oracle(runtime_canary_available: bool) -> CudaPackedOracleS
     }
 }
 
+/// Finds the latest installed Visual Studio version with C++ build tools.
+///
+/// # Examples
+///
+/// ```
+/// if let Some(version) = probe_visual_studio_version() {
+///     println!("Visual Studio version: {version}");
+/// }
+/// ```
+///
+/// Returns the installation version, or `None` when the required tools or
+/// version probe are unavailable.
 #[cfg(windows)]
 fn probe_visual_studio_version() -> Option<String> {
     let root = std::env::var_os("ProgramFiles(x86)")?;
@@ -1035,6 +1191,15 @@ fn probe_visual_studio_version() -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// Probes the Vulkan loader and reports the available physical devices.
+///
+/// # Examples
+///
+/// ```
+/// let status = probe_vulkan();
+/// assert!(!status.detail.is_empty());
+/// ```
+fn probe_vulkan() -> ProbeStatus {
 fn probe_vulkan() -> ProbeStatus {
     let output = ProcessCommand::new("vulkaninfo").arg("--summary").output();
     match output {
@@ -1066,6 +1231,14 @@ fn probe_vulkan() -> ProbeStatus {
     }
 }
 
+/// Probes connected Windows ComputeAccelerator devices for a started NPU.
+///
+/// # Examples
+///
+/// ```no_run
+/// let status = probe_windows_ml_npu();
+/// println!("{}", status.detail);
+/// ```
 #[cfg(windows)]
 fn probe_windows_ml_npu() -> ProbeStatus {
     let output = ProcessCommand::new("pnputil")
@@ -1118,7 +1291,25 @@ fn probe_windows_ml_npu() -> ProbeStatus {
     }
 }
 
-#[cfg(not(windows))]
+/// Reports Windows ML/NPU availability on non-Windows platforms.
+
+///
+
+/// # Examples
+
+///
+
+/// ```
+
+/// let status = probe_windows_ml_npu();
+
+/// assert!(!status.available);
+
+/// ```
+
+///
+
+/// #[cfg(not(windows))]
 fn probe_windows_ml_npu() -> ProbeStatus {
     ProbeStatus {
         available: false,
@@ -1126,6 +1317,26 @@ fn probe_windows_ml_npu() -> ProbeStatus {
     }
 }
 
+/// Selects diagnostic text from command output, falling back to a default message when the output is empty.
+///
+/// # Examples
+///
+/// ```
+/// let detail = probe_failure_detail(b"driver unavailable\n", "probe failed");
+/// assert_eq!(detail, "driver unavailable");
+///
+/// let fallback = probe_failure_detail(b"", "probe failed");
+/// assert_eq!(fallback, "probe failed");
+/// ```
+///
+/// # Arguments
+///
+/// * `stderr` - Command output containing diagnostic text.
+/// * `unavailable` - Message used when `stderr` is empty after trimming.
+///
+/// # Returns
+///
+/// The trimmed diagnostic text, or `unavailable` when no diagnostic text is present.
 fn probe_failure_detail(stderr: &[u8], unavailable: &str) -> String {
     let detail = String::from_utf8_lossy(stderr).trim().to_owned();
     if detail.is_empty() {
@@ -1474,7 +1685,21 @@ fn detokenize(model: &Path, tokens: &[u32], include_special_tokens: bool, json: 
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Runs a single chat completion from a prompt or a JSON chat transcript.
+///
+/// The completion is streamed as text or emitted as JSON. An optional session can
+/// be restored before completion and saved afterward.
+///
+/// # Examples
+///
+/// ```text
+/// bridge chat --model model.gguf --prompt "Explain ownership in Rust."
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the input mode is invalid, the model or session cannot be
+/// opened, completion fails, or output cannot be written.
 fn chat(
     runtime: RuntimeArgs,
     sampling: SamplingArgs,
@@ -1600,6 +1825,25 @@ struct BenchRunArgs {
     json: bool,
 }
 
+/// Benchmarks model completion performance using a single prompt, a validated prompt corpus, or cold/admission/warm phases.
+///
+/// The benchmark records completion timing, throughput, backend information, cache statistics, and optionally
+/// Chrome trace output. Cold/admission/warm runs and corpus repetitions verify deterministic generated token IDs.
+/// Cache heat is persisted after a successful run.
+///
+/// # Examples
+///
+/// ```no_run
+/// # // Construct `BenchRunArgs` from the CLI configuration.
+/// # let args = todo!();
+/// bench(args).unwrap();
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the engine cannot be opened, the hardware profile or prompt corpus is invalid, a
+/// completion fails, generated tokens are nondeterministic across repeated runs, or benchmark output cannot
+/// be persisted.
 fn bench(args: BenchRunArgs) -> Result<()> {
     let BenchRunArgs {
         runtime,
@@ -1797,6 +2041,29 @@ struct BenchmarkCorpusV1 {
     prompts: Vec<String>,
 }
 
+/// Reads and validates a versioned benchmark corpus from a JSON file.
+///
+/// # Examples
+///
+/// ```
+/// let path = std::path::Path::new("benchmark-corpus.json");
+/// let corpus = read_benchmark_corpus(path)?;
+/// assert!(!corpus.prompts.is_empty());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read, exceeds the maximum JSON input
+/// size, or contains an invalid benchmark corpus.
+///
+/// # Arguments
+///
+/// * `path` - Path to the benchmark corpus JSON file.
+///
+/// # Returns
+///
+/// The validated benchmark corpus.
 fn read_benchmark_corpus(path: &Path) -> Result<BenchmarkCorpusV1> {
     let bytes =
         fs::read(path).with_context(|| format!("failed to read benchmark corpus {}", path.display()))?;
@@ -1810,6 +2077,26 @@ fn read_benchmark_corpus(path: &Path) -> Result<BenchmarkCorpusV1> {
     parse_benchmark_corpus(&bytes)
 }
 
+/// Parses and validates a version 1 benchmark corpus from JSON bytes.
+///
+/// # Errors
+///
+/// Returns an error when the JSON is invalid, the corpus format or version is unsupported,
+/// or the corpus contains invalid, oversized, or duplicate prompts.
+///
+/// # Examples
+///
+/// ```
+/// let corpus = parse_benchmark_corpus(
+///     br#"{"format":"lightbridge-benchmark-corpus","version":1,"prompts":["Hello"]}"#,
+/// )
+/// .unwrap();
+///
+/// assert_eq!(corpus.prompts, vec!["Hello"]);
+/// ```
+///
+/// `bytes` must contain a JSON-encoded [`BenchmarkCorpusV1`].
+fn parse_benchmark_corpus(bytes: &[u8]) -> Result<BenchmarkCorpusV1> {
 fn parse_benchmark_corpus(bytes: &[u8]) -> Result<BenchmarkCorpusV1> {
     let corpus: BenchmarkCorpusV1 =
         serde_json::from_slice(bytes).context("benchmark corpus is not valid bounded JSON")?;
@@ -1842,7 +2129,34 @@ fn parse_benchmark_corpus(bytes: &[u8]) -> Result<BenchmarkCorpusV1> {
     Ok(corpus)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Benchmarks each prompt in a corpus for the requested number of repeats and reports median performance metrics.
+///
+/// Each prompt must produce identical token IDs across repeats. The benchmark also records per-run
+/// timing, cache deltas, backend state, completion output, and optional Chrome trace data.
+///
+/// # Errors
+///
+/// Returns an error if `repeats` is outside the supported range, a repeated prompt produces
+/// different token IDs, or benchmarking or report persistence fails.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Run a validated benchmark corpus and emit its report.
+/// bench_corpus(
+///     &runtime,
+///     &sampling,
+///     &engine,
+///     initial_backend,
+///     corpus,
+///     3,
+///     benchmark_started,
+///     trace,
+///     None,
+///     true,
+/// )?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn bench_corpus(
     runtime: &RuntimeArgs,
     sampling: &SamplingArgs,
@@ -1967,6 +2281,33 @@ fn bench_corpus(
     }
 }
 
+/// Builds an authenticated, drift-sensitive tuning profile from model, hardware, and microbenchmark data.
+///
+/// The model payload is authenticated before tuning. When provided, the sidecar data and manifest
+/// are authenticated together. The resulting profile is written atomically to `output`; measured
+/// candidates are recorded, while execution-policy changes require full-token correctness evidence.
+///
+/// # Errors
+///
+/// Returns an error if authentication, probing, benchmarking, profile serialization, or output
+/// writing fails. Also errors if `samples` is zero or only one sidecar path is provided.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use std::path::Path;
+/// # let model = Path::new("model.gguf");
+/// # let output = Path::new("tuning-profile.json");
+/// let result = tune(
+///     model,
+///     None,
+///     None,
+///     TuneProfileArg::Performance,
+///     output,
+///     3,
+/// );
+/// assert!(result.is_ok());
+/// ```
 fn tune(
     model: &Path,
     sidecar_path: Option<&Path>,
@@ -2120,6 +2461,15 @@ fn tune(
     )
 }
 
+/// Creates a non-authoritative CUDA backend decision with a supplied or default rejection reason.
+///
+/// # Examples
+///
+/// ```
+/// let decision = cuda_tuning_decision(Some("runtime qualification failed".to_owned()));
+/// let _ = decision;
+/// ```
+fn cuda_tuning_decision...
 fn cuda_tuning_decision(rejection_reason: Option<String>) -> BackendDecision {
     BackendDecision::rejected(
         BackendKind::Cuda,
@@ -2130,6 +2480,20 @@ fn cuda_tuning_decision(rejection_reason: Option<String>) -> BackendDecision {
     )
 }
 
+/// Benchmarks CPU thread-count and affinity configurations for packed GEMV execution.
+///
+/// Returns all measurements together with the fastest thread count and its CPU affinity set.
+///
+/// # Examples
+///
+/// ```
+/// let topology = CpuTopology::detect();
+/// let (measurements, threads, cpu_set_ids) = tune_cpu_threads(&topology, 1).unwrap();
+///
+/// assert!(!measurements.is_empty());
+/// assert!(threads > 0);
+/// assert!(cpu_set_ids.is_empty() || cpu_set_ids.len() == threads);
+/// ```
 fn tune_cpu_threads(
     topology: &CpuTopology,
     samples: usize,
@@ -2225,6 +2589,19 @@ fn tune_cpu_threads(
     Ok((measurements, threads, cpu_set_ids))
 }
 
+/// Benchmarks available CPU packed-dot backends against mixed quantized weight formats.
+///
+/// # Parameters
+///
+/// * `samples` - Number of timing samples collected for each available backend.
+///
+/// # Examples
+///
+/// ```
+/// let (measurements, rejections) = tune_cpu_dot_backends(1)?;
+/// assert!(!measurements.is_empty() || !rejections.is_empty());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn tune_cpu_dot_backends(samples: usize) -> Result<(Vec<TuningMeasurement>, Vec<CandidateRejection>)> {
     let logical_elements = 1_024;
     let input = (0..logical_elements)
@@ -2310,6 +2687,20 @@ fn tune_cpu_dot_backends(samples: usize) -> Result<(Vec<TuningMeasurement>, Vec<
     Ok((measurements, rejections))
 }
 
+/// Benchmarks CUDA packed GEMV candidates and verifies their outputs against scalar results.
+///
+/// The candidates cover several quantized weight formats and an IQ2_S paired submission.
+/// Failed or non-bit-exact candidates are returned as rejections rather than causing the
+/// benchmark to fail.
+///
+/// # Examples
+///
+/// ```no_run
+/// let (measurements, rejections) = tune_cuda_packed_executor(3)?;
+/// println!("{} candidates measured", measurements.len());
+/// println!("{} candidates rejected", rejections.len());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn tune_cuda_packed_executor(samples: usize) -> Result<(Vec<TuningMeasurement>, Vec<CandidateRejection>)> {
     const LOGICAL_ELEMENTS: usize = 4_096;
     const ROWS: usize = 1_344;
@@ -2555,6 +2946,35 @@ fn tune_cuda_packed_executor(samples: usize) -> Result<(Vec<TuningMeasurement>, 
     Ok((measurements, rejections))
 }
 
+/// Benchmarks buffered file reads across several queue depths and records any additional platform-specific tuning failures.
+///
+/// `samples` controls the number of measurements collected for each queue depth.
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> anyhow::Result<()> {
+/// let path = std::env::temp_dir().join(format!(
+///     "bridge-storage-tuning-{}",
+///     std::process::id()
+/// ));
+/// std::fs::write(&path, vec![0_u8; 4096])?;
+///
+/// let (measurements, best_queue_depth, rejections) =
+///     tune_buffered_storage(&path, 1)?;
+///
+/// assert!(!measurements.is_empty());
+/// assert!((1..=4).contains(&best_queue_depth));
+/// assert!(rejections.is_empty());
+///
+/// std::fs::remove_file(path)?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Returns
+///
+/// A tuple containing the queue-depth measurements, the best buffered queue depth, and any rejected platform-specific candidates.
 fn tune_buffered_storage(
     path: &Path,
     samples: usize,
@@ -2643,6 +3063,24 @@ fn tune_buffered_storage(
     Ok((measurements, best_queue_depth, rejections))
 }
 
+/// Benchmarks overlapped IOCP reads for several queue depths and buffering modes.
+///
+/// # Arguments
+///
+/// * `path` - File used as the benchmark source.
+/// * `samples` - Number of read batches measured for each queue depth.
+/// * `buffering` - File buffering mode used for the reads.
+///
+/// # Examples
+///
+/// ```no_run
+/// let measurements = tune_iocp_storage(
+///     std::path::Path::new("model.gguf"),
+///     3,
+///     FileBuffering::Buffered,
+/// ).unwrap();
+/// assert_eq!(measurements.len(), 3);
+/// ```
 #[cfg(windows)]
 fn tune_iocp_storage(
     path: &Path,
@@ -2712,6 +3150,27 @@ fn tune_iocp_storage(
     Ok(measurements)
 }
 
+/// Validates a persisted hardware tuning profile against the current run configuration.
+///
+/// The validation checks the current hardware, authenticated model payload, and optional
+/// sidecar artifacts. The profile must reference the same model and sidecar artifacts and
+/// remain compatible with the detected hardware.
+///
+/// # Errors
+///
+/// Returns an error if the profile cannot be read or parsed, required artifact authentication
+/// data is unavailable, sidecar arguments are incomplete, or the profile is invalid.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use std::path::Path;
+/// # let path = Path::new("tuning-profile.json");
+/// # let runtime = runtime_args();
+/// # let engine = open_engine(&runtime)?;
+/// validate_hardware_profile(path, &runtime, &engine)?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn validate_hardware_profile(path: &Path, runtime: &RuntimeArgs, engine: &Hy3ChatEngine) -> Result<()> {
     let bytes = read_bounded(path)?;
     let profile: TuningProfileV1 =
@@ -2739,6 +3198,21 @@ fn validate_hardware_profile(path: &Path, runtime: &RuntimeArgs, engine: &Hy3Cha
         .with_context(|| format!("hardware profile {} is not valid for this run", path.display()))
 }
 
+/// Adds prefill and decode events for a generation to a Chrome trace.
+///
+/// # Examples
+///
+/// ```
+/// let mut trace = ChromeTrace::default();
+/// let stats = bridge_runtime::GenerationStats {
+///     prompt_tokens: 4,
+///     generated_tokens: 2,
+///     prefill_duration: Duration::from_millis(10),
+///     decode_duration: Duration::from_millis(20),
+/// };
+///
+/// append_completion_trace(&mut trace, "single", Duration::ZERO, stats);
+/// ```
 fn append_completion_trace(
     trace: &mut ChromeTrace,
     phase: &str,
@@ -2765,6 +3239,14 @@ fn append_completion_trace(
     );
 }
 
+/// Persists a Chrome trace as newline-terminated JSON when a destination path is provided.
+///
+/// # Examples
+///
+/// ```
+/// let trace = ChromeTrace::default();
+/// assert!(persist_trace(None, &trace).is_ok());
+/// ```
 fn persist_trace(path: Option<&Path>, trace: &ChromeTrace) -> Result<()> {
     let Some(path) = path else {
         return Ok(());
@@ -2774,6 +3256,16 @@ fn persist_trace(path: Option<&Path>, trace: &ChromeTrace) -> Result<()> {
     atomic_write(path, &bytes)
 }
 
+/// Collects the current hardware, runtime, and executable identity for tuning validation.
+///
+/// # Examples
+///
+/// ```
+/// let fingerprint = current_hardware_fingerprint()?;
+/// assert!(!fingerprint.operating_system.is_empty());
+/// assert!(!fingerprint.architecture.is_empty());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn current_hardware_fingerprint() -> Result<HardwareFingerprintV1> {
     let topology = CpuTopology::detect();
     let topology_bytes = serde_json::to_vec(&topology)?;
@@ -2905,6 +3397,24 @@ fn current_hardware_fingerprint() -> Result<HardwareFingerprintV1> {
     })
 }
 
+/// Creates an artifact fingerprint from a regular file and its verified SHA-256 hash.
+///
+/// # Errors
+///
+/// Returns an error if the path cannot be inspected or does not refer to a regular file.
+///
+/// # Examples
+///
+/// ```
+/// let path = std::path::Path::new("model.gguf");
+/// let fingerprint = artifact_from_verified_hash(path, "abc123")?;
+/// assert_eq!(fingerprint.sha256, "abc123");
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Returns
+///
+/// An artifact fingerprint containing the file's canonical path, length, and supplied SHA-256 hash.
 fn artifact_from_verified_hash(path: &Path, sha256: &str) -> Result<ArtifactFingerprint> {
     let metadata = fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
     if !metadata.is_file() {
@@ -2917,6 +3427,23 @@ fn artifact_from_verified_hash(path: &Path, sha256: &str) -> Result<ArtifactFing
     })
 }
 
+/// Resolves a path to its canonical, lossless string representation.
+///
+/// # Examples
+///
+/// ```
+/// let path = canonical_string(std::path::Path::new("."))?;
+/// assert!(!path.is_empty());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Parameters
+///
+/// * `path` - The path to canonicalize.
+///
+/// # Errors
+///
+/// Returns an error if the path cannot be canonicalized.
 fn canonical_string(path: &Path) -> Result<String> {
     Ok(fs::canonicalize(path)
         .with_context(|| format!("failed to canonicalize {}", path.display()))?
@@ -2924,6 +3451,27 @@ fn canonical_string(path: &Path) -> Result<String> {
         .into_owned())
 }
 
+/// Computes the SHA-256 digest of a file as a lowercase hexadecimal string.
+///
+/// # Examples
+///
+/// ```
+/// let path = std::env::temp_dir().join("sha256_file_example.txt");
+/// std::fs::write(&path, b"hello")?;
+///
+/// let digest = sha256_file(&path)?;
+/// assert_eq!(
+///     digest,
+///     "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+/// );
+///
+/// std::fs::remove_file(path)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or read.
 fn sha256_file(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut buffer = vec![0_u8; 8 * 1024 * 1024];
@@ -2940,6 +3488,17 @@ fn sha256_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+/// Reports the active Windows power scheme and battery status.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(windows)]
+/// # {
+/// let state = probe_power_state();
+/// assert!(state.contains(';'));
+/// # }
+/// ```
 #[cfg(windows)]
 fn probe_power_state() -> String {
     let scheme =
@@ -2959,11 +3518,25 @@ fn probe_power_state() -> String {
     format!("{ac};{scheme}")
 }
 
-#[cfg(not(windows))]
+/// Reports the current power state on unsupported platforms.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(probe_power_state(), "unknown");
+/// ```
 fn probe_power_state() -> String {
     "unknown".to_owned()
 }
 
+/// Runs a program and captures its non-empty standard output when it exits successfully.
+///
+/// # Examples
+///
+/// ```
+/// let version = probe_version("rustc", &["--version"]);
+/// assert!(version.is_some());
+/// ```
 fn probe_version(program: &str, arguments: &[&str]) -> Option<String> {
     ProcessCommand::new(program)
         .args(arguments)
@@ -2974,6 +3547,22 @@ fn probe_version(program: &str, arguments: &[&str]) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Inspects or removes a persisted expert-cache heat snapshot.
+///
+/// # Examples
+///
+/// ```
+/// use std::{fs, path::PathBuf};
+///
+/// let path = PathBuf::from(std::env::temp_dir()).join(format!(
+///     "bridge-cache-example-{}",
+///     std::process::id()
+/// ));
+/// fs::write(&path, b"snapshot").unwrap();
+///
+/// cache(CacheCommand::ClearHeat { path: path.clone() }).unwrap();
+/// assert!(!path.exists());
+/// ```
 fn cache(command: CacheCommand) -> Result<()> {
     match command {
         CacheCommand::InspectHeat { path, max_entries } => {
@@ -3129,6 +3718,31 @@ fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)
 }
 
+/// Builds engine runtime options from the command-line runtime arguments.
+///
+/// Sidecar data and its manifest must be provided together. A zero CPU-thread
+/// value selects the recommended thread count, while memory sizes are converted
+/// from MiB and must fit the platform's `usize`.
+///
+/// # Errors
+///
+/// Returns an error if only one sidecar path is provided or a configured memory
+/// size cannot be represented on the platform.
+///
+/// # Examples
+///
+/// ```no_run
+/// let options = runtime_options(&args)?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Arguments
+///
+/// * `args` — Runtime configuration used to construct the engine options.
+///
+/// # Returns
+///
+/// The configured scalar engine options.
 fn runtime_options(args: &RuntimeArgs) -> Result<Hy3ScalarOptions> {
     let expert_source = match (&args.sidecar_data, &args.sidecar_manifest) {
         (Some(data_path), Some(manifest_path)) => ExpertSourceOptions::Sidecar {

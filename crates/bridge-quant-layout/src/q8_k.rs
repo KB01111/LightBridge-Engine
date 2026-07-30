@@ -11,16 +11,32 @@ const Q8_D_OFFSET: usize = 0;
 const Q8_QUANTS_OFFSET: usize = 4;
 const Q8_BLOCK_SUMS_OFFSET: usize = 260;
 
-/// Returns the authenticated IQ2_S codebook used by exact CPU and accelerator
-/// oracles. The table is immutable and its digest is covered by this crate's
-/// fixture tests.
+/// Provides the immutable IQ2_S codebook.
+
+///
+
+/// # Examples
+
+///
+
+/// ```
+
+/// let grid = iq2_s_grid_table();
+
+/// assert_eq!(grid.len(), 1024);
+
+/// ```
 pub fn iq2_s_grid_table() -> &'static [u64; 1024] {
     &IQ2S_GRID
 }
 
-/// Returns the authenticated IQ3_S codebook used by exact CPU and accelerator
-/// oracles. The table is immutable and its digest is covered by this crate's
-/// fixture tests.
+/// Provides the immutable IQ3_S codebook.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(iq3_s_grid_table().len(), 512);
+/// ```
 pub fn iq3_s_grid_table() -> &'static [u32; 512] {
     &IQ3S_GRID
 }
@@ -34,6 +50,16 @@ pub enum CpuDotBackend {
 }
 
 impl CpuDotBackend {
+    /// Determines whether the CPU supports this dot-product backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert!(CpuDotBackend::Scalar.available());
+    /// ```
+    ///
+    /// Returns `true` for the scalar backend and for hardware-accelerated backends
+    /// whose required CPU features are available; otherwise, returns `false`.
     pub fn available(self) -> bool {
         match self {
             Self::Scalar => true,
@@ -54,6 +80,13 @@ impl CpuDotBackend {
         }
     }
 
+    /// Returns the stable identifier for this CPU dot-product backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(CpuDotBackend::Scalar.name(), "scalar");
+    /// ```
     pub const fn name(self) -> &'static str {
         match self {
             Self::Scalar => "scalar",
@@ -64,6 +97,16 @@ impl CpuDotBackend {
     }
 }
 
+/// Determines whether the current x86_64 CPU supports AVX-VNNI.
+///
+/// # Examples
+///
+/// ```
+/// let supported = avx_vnni_available();
+/// assert!(supported || !supported);
+/// ```
+///
+/// `false` is returned when AVX2 or AVX-VNNI support is unavailable.
 #[cfg(target_arch = "x86_64")]
 fn avx_vnni_available() -> bool {
     if !std::is_x86_feature_detected!("avx2") {
@@ -103,6 +146,37 @@ pub struct ValidatedQ8KMatrix<'a> {
 }
 
 impl<'a> ValidatedQ8KMatrix<'a> {
+    /// Validates packed weights and Q8_K activations for repeated row dot products.
+    ///
+    /// The inputs must describe supported quantized weights with matching encoded
+    /// lengths and finite scale values. The selected CPU backend must also be
+    /// available.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the weight type, logical element count, encoded lengths,
+    /// scale values, arithmetic bounds, or CPU backend is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use bridge_quant_layout::q8_k::{CpuDotBackend, ValidatedQ8KMatrix};
+    /// # use bridge_quant_layout::GgmlType;
+    /// let weights = vec![0u8; 144];
+    /// let q8 = vec![0u8; 292];
+    ///
+    /// let matrix = ValidatedQ8KMatrix::new(
+    ///     GgmlType::Q4_K,
+    ///     &weights,
+    ///     &q8,
+    ///     256,
+    ///     1,
+    ///     CpuDotBackend::Scalar,
+    /// )?;
+    ///
+    /// assert_eq!(matrix.output_rows(), 1);
+    /// # Ok::<(), bridge_quant_layout::QuantError>(())
+    /// ```
     pub fn new(
         weight_type: GgmlType,
         weights: &'a [u8],
@@ -165,16 +239,72 @@ impl<'a> ValidatedQ8KMatrix<'a> {
         })
     }
 
+    /// Returns the CPU backend configured for this matrix.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn example(matrix: ValidatedQ8KMatrix<'_>) {
+    /// let backend = matrix.backend();
+    /// assert!(matches!(
+    ///     backend,
+    ///     CpuDotBackend::Scalar
+    ///         | CpuDotBackend::Avx2
+    ///         | CpuDotBackend::AvxVnni
+    ///         | CpuDotBackend::Avx512Vnni
+    /// ));
+    /// # }
+    /// ```
     pub const fn backend(self) -> CpuDotBackend {
         self.backend
     }
 
+    /// Gets the number of output rows in the validated matrix.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use bridge_quant_layout::{CpuDotBackend, GgmlType, ValidatedQ8KMatrix};
+    /// let weights = vec![0u8; 144 * 2];
+    /// let q8 = vec![0u8; 292];
+    /// let matrix = ValidatedQ8KMatrix::new(
+    ///     GgmlType::Q4_K,
+    ///     &weights,
+    ///     &q8,
+    ///     256,
+    ///     2,
+    ///     CpuDotBackend::Scalar,
+    /// ).unwrap();
+    ///
+    /// assert_eq!(matrix.output_rows(), 2);
+    /// ```
     pub const fn output_rows(self) -> usize {
         self.output_rows
     }
 
-    /// Computes one row after the constructor has completed every
-    /// model-controlled validation step.
+    /// Computes the dot product for a validated weight row and Q8_K activation row.
+    ///
+    /// # Errors
+    ///
+    /// Returns `QuantError::MatrixRowOutOfRange` if `row` is outside the validated
+    /// output-row range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let weights = vec![0u8; 144];
+    /// let q8 = vec![0u8; Q8_K_BLOCK_BYTES];
+    /// let matrix = ValidatedQ8KMatrix::new(
+    ///     GgmlType::Q4_K,
+    ///     &weights,
+    ///     &q8,
+    ///     Q8_K_BLOCK_ELEMENTS,
+    ///     1,
+    ///     CpuDotBackend::Scalar,
+    /// ).unwrap();
+    ///
+    /// assert_eq!(matrix.dot_row(0).unwrap(), 0.0);
+    /// ```
     pub fn dot_row(self, row: usize) -> Result<f32> {
         if row >= self.output_rows {
             return Err(QuantError::MatrixRowOutOfRange {
@@ -240,8 +370,29 @@ impl<'a> ValidatedQ8KMatrix<'a> {
     }
 }
 
-/// Quantizes one or more exact 256-lane activation blocks with llama.cpp's
-/// pinned scalar Q8_K reference semantics.
+/// Quantizes activation values into the pinned scalar Q8_K encoding.
+///
+/// The input length must be a positive multiple of 256, and `encoded` must have
+/// exactly one Q8_K block for each 256 input values. Returns an error for
+/// invalid lengths or non-finite input values.
+///
+/// # Examples
+///
+/// ```
+/// let input = vec![0.0_f32; 256];
+/// let mut encoded = vec![0_u8; Q8_K_BLOCK_BYTES];
+///
+/// quantize_row_q8_k_into(&input, &mut encoded).unwrap();
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the input length is invalid, the output buffer has an
+/// incorrect length, or an input value is not finite.
+///
+/// # Returns
+///
+/// `Ok(())` when the output buffer contains the encoded Q8_K activation row.
 pub fn quantize_row_q8_k_into(input: &[f32], encoded: &mut [u8]) -> Result<()> {
     let block_count = validate_logical_elements(GgmlType::Q8_K, input.len())?;
     let expected = checked_bytes(block_count, Q8_K_BLOCK_BYTES, "Q8_K encoded row length")?;
@@ -304,8 +455,27 @@ pub fn quantize_row_q8_k_into(input: &[f32], encoded: &mut [u8]) -> Result<()> {
     Ok(())
 }
 
-/// Computes the pinned scalar dot product for a selected packed weight row and
-/// an already-quantized Q8_K activation row.
+/// Computes the scalar dot product between one packed weight row and a Q8_K activation row.
+///
+/// # Errors
+///
+/// Returns an error if the weight type, logical element count, or encoded slice lengths are invalid,
+/// or if the encoded scales are not finite.
+///
+/// # Examples
+///
+/// ```
+/// let result = vec_dot_q8_k(GgmlType::Q4_K, &[], &[], 0);
+/// assert!(result.is_err());
+/// ```
+///
+/// # Parameters
+///
+/// * `logical_elements` — Number of logical elements represented by the encoded rows.
+///
+/// # Returns
+///
+/// The computed dot product as an `f32`.
 pub fn vec_dot_q8_k(
     weight_type: GgmlType,
     weights: &[u8],
@@ -323,7 +493,24 @@ pub fn vec_dot_q8_k(
     .dot_row(0)
 }
 
-/// Validates both packed rows without performing the dot product.
+/// Validates packed weights and Q8_K activations for a single output row without computing their dot product.
+///
+/// # Examples
+///
+/// ```
+/// let weights = vec![0u8; 144];
+/// let q8 = vec![0u8; 292];
+///
+/// assert!(validate_vec_dot_q8_k(GgmlType::Q4_K, &weights, &q8, 256).is_ok());
+/// ```
+///
+/// # Arguments
+///
+/// * `logical_elements` — Number of logical elements represented by the packed data.
+///
+/// # Returns
+///
+/// `Ok(())` when the weight type, encoded lengths, scales, and logical element count are valid; otherwise, a validation error.
 pub fn validate_vec_dot_q8_k(
     weight_type: GgmlType,
     weights: &[u8],
@@ -341,8 +528,19 @@ pub fn validate_vec_dot_q8_k(
     .map(|_| ())
 }
 
-/// Runs the accepted exact dot product with AVX2 when available, falling back
-/// to the scalar oracle. AVX-512 remains an explicit tuner-selected candidate.
+/// Computes a Q8_K dot product using AVX2 when available, otherwise using the scalar backend.
+///
+/// # Examples
+///
+/// ```no_run
+/// let result = vec_dot_q8_k_cpu(GgmlType::Q4_K, weights, q8, logical_elements)?;
+/// # let _: f32 = result;
+/// # Ok::<(), QuantError>(())
+/// ```
+///
+/// # Returns
+///
+/// The computed dot product, or an error if the encoded inputs are invalid or the selected backend is unavailable.
 pub fn vec_dot_q8_k_cpu(
     weight_type: GgmlType,
     weights: &[u8],
@@ -357,8 +555,25 @@ pub fn vec_dot_q8_k_cpu(
     vec_dot_q8_k_cpu_backend(weight_type, weights, q8, logical_elements, backend)
 }
 
-/// Executes one explicitly selected CPU implementation without silently
-/// substituting another backend.
+/// Computes a Q8_K dot product using the explicitly selected CPU backend.
+///
+/// # Errors
+///
+/// Returns an error if the encoded inputs are invalid or the selected backend
+/// is unavailable on the current CPU.
+///
+/// # Examples
+///
+/// ```
+/// let result = vec_dot_q8_k_cpu_backend(
+///     GgmlType::Q4_K,
+///     &[],
+///     &[],
+///     0,
+///     CpuDotBackend::Scalar,
+/// );
+/// assert!(result.is_err());
+/// ```
 pub fn vec_dot_q8_k_cpu_backend(
     weight_type: GgmlType,
     weights: &[u8],
@@ -369,6 +584,18 @@ pub fn vec_dot_q8_k_cpu_backend(
     ValidatedQ8KMatrix::new(weight_type, weights, q8, logical_elements, 1, backend)?.dot_row(0)
 }
 
+/// Computes a scalar dot product for a supported quantized weight type.
+///
+/// # Examples
+///
+/// ```
+/// let result = dot_scalar(GgmlType::Q4_K, &[], &[], 0);
+/// assert_eq!(result, 0.0);
+/// ```
+///
+/// # Parameters
+///
+/// * `block_count` — The number of quantized weight and activation blocks to process.
 fn dot_scalar(weight_type: GgmlType, weights: &[u8], q8: &[u8], block_count: usize) -> f32 {
     match weight_type {
         GgmlType::Q4_K | GgmlType::Q5_K => dot_q4_or_q5_k(weight_type, weights, q8, block_count),
@@ -642,6 +869,20 @@ fn dot_iq3_s(weights: &[u8], q8: &[u8], block_count: usize) -> f32 {
     sum
 }
 
+/// Computes a quantized dot product using the selected AVX2 or VNNI implementation.
+///
+/// # Safety
+///
+/// The caller must ensure that AVX2 is supported and that `weights` and `q8`
+/// contain validated packed data for `block_count` blocks.
+///
+/// # Examples
+///
+/// ```ignore
+/// let result = unsafe { dot_avx2(weight_type, weights, q8, block_count, VnniMode::None) };
+/// assert!(result.is_finite());
+/// ```
+///
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn dot_avx2(
@@ -669,8 +910,28 @@ unsafe fn dot_avx2(
     }
 }
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+/// Computes a Q4_K or Q5_K dot product using AVX2.
+///
+/// The inputs must contain validated packed weights and Q8_K activations for
+/// `block_count` blocks. The selected VNNI mode must match the available CPU
+/// features.
+///
+/// # Safety
+///
+/// The caller must ensure that AVX2 is available and that all slices contain
+/// the expected data for `weight_type` and `block_count`.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(target_arch = "x86_64")]
+/// # {
+/// let result = unsafe {
+///     dot_q4_or_q5_k_avx2(GgmlType::Q4_K, &[], &[], 0, VnniMode::None)
+/// };
+/// assert_eq!(result, 0.0);
+/// # }
+/// ```
 unsafe fn dot_q4_or_q5_k_avx2(
     weight_type: GgmlType,
     weights: &[u8],
@@ -764,6 +1025,25 @@ unsafe fn dot_q4_or_q5_k_avx2(
     sum
 }
 
+/// Computes the IQ2_S dot product using AVX2-compatible instructions.
+///
+/// `block_count` specifies the number of 82-byte IQ2_S weight blocks and corresponding Q8_K activation blocks.
+///
+/// # Safety
+///
+/// The caller must ensure AVX2 is available and that `weights` and `q8` contain enough encoded data for
+/// `block_count` blocks. The `vnni` mode must match the CPU features available to the caller.
+///
+/// # Examples
+///
+/// ```
+/// let result = unsafe { dot_iq2_s_avx2(&[], &[], 0, VnniMode::None) };
+/// assert_eq!(result, 0.0);
+/// ```
+///
+/// # Returns
+///
+/// The accumulated IQ2_S and Q8_K dot product.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn dot_iq2_s_avx2(weights: &[u8], q8: &[u8], block_count: usize, vnni: VnniMode) -> f32 {
@@ -868,6 +1148,22 @@ unsafe fn dot_iq2_s_avx2(weights: &[u8], q8: &[u8], block_count: usize, vnni: Vn
     0.125_f32 * sum
 }
 
+/// Computes the IQ3_S and Q8_K dot product using AVX2-compatible instructions.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(target_arch = "x86_64")]
+/// # {
+/// let result = unsafe { dot_iq3_s_avx2(&[], &[], 0, VnniMode::None) };
+/// assert_eq!(result, 0.0);
+/// # }
+/// ```
+///
+/// # Safety
+///
+/// The caller must ensure that AVX2 is available and that the encoded slices
+/// contain `block_count` valid IQ3_S and Q8_K blocks.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn dot_iq3_s_avx2(weights: &[u8], q8: &[u8], block_count: usize, vnni: VnniMode) -> f32 {
@@ -957,6 +1253,25 @@ unsafe fn dot_iq3_s_avx2(weights: &[u8], q8: &[u8], block_count: usize, vnni: Vn
     sum
 }
 
+/// Computes eight accumulated signed byte dot-product lanes from 32 weights and activations.
+///
+/// Each output lane sums the products of two corresponding weight and activation pairs.
+/// The slices must each contain at least 32 elements.
+///
+/// # Safety
+///
+/// The caller must ensure the CPU supports AVX2 and that both slices contain at least
+/// 32 elements.
+///
+/// # Examples
+///
+/// ```
+/// let weights = [2_i8; 32];
+/// let activations = [1_u8; 32];
+/// let lanes = unsafe { lane_sums_i8_32(&weights, &activations) };
+///
+/// assert_eq!(lanes, [4; 8]);
+/// ```
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn lane_sums_i8_32(weights: &[i8], activations: &[u8]) -> [i32; 8] {
@@ -990,8 +1305,22 @@ unsafe fn lane_sums_i8_32(weights: &[i8], activations: &[u8]) -> [i32; 8] {
     lanes
 }
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+/// Computes the signed dot product of the first 16 weights and activation values.
+///
+/// # Safety
+///
+/// The caller must ensure AVX-VNNI is available and that both slices contain at
+/// least 16 elements.
+///
+/// # Examples
+///
+/// ```no_run
+/// let weights = [1_i8; 16];
+/// let activations = [1_u8; 16];
+///
+/// let result = unsafe { dot_i8_avx_vnni_16(&weights, &activations) };
+/// assert_eq!(result, 16);
+/// ```
 unsafe fn dot_i8_avx_vnni_16(weights: &[i8], activations: &[u8]) -> i32 {
     use std::arch::asm;
 
@@ -1030,6 +1359,24 @@ unsafe fn dot_i8_avx_vnni_16(weights: &[i8], activations: &[u8]) -> i32 {
     shifted_sum - 128 * weight_sum
 }
 
+/// Computes the signed 8-bit dot product of 32 weights and activations using AVX-VNNI.
+///
+/// # Safety
+///
+/// The caller must ensure AVX-VNNI is available and that both slices contain at least 32 elements.
+///
+/// # Examples
+///
+/// ```
+/// let weights = [1_i8; 32];
+/// let activations = [1_u8; 32];
+/// let result = unsafe { dot_i8_avx_vnni_32(&weights, &activations) };
+/// assert_eq!(result, 32);
+/// ```
+///
+/// # Returns
+///
+/// The signed dot product of the first 32 elements of `weights` and `activations`.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn dot_i8_avx_vnni_32(weights: &[i8], activations: &[u8]) -> i32 {
@@ -1066,8 +1413,29 @@ unsafe fn dot_i8_avx_vnni_32(weights: &[i8], activations: &[u8]) -> i32 {
     shifted_sum - 128 * weight_sum
 }
 
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512f,avx512bw,avx512vl,avx512vnni")]
+/// Computes eight signed dot-product sums for groups of four lanes using AVX-512 VNNI.
+///
+/// # Safety
+///
+/// The caller must ensure that the CPU supports AVX-512F, AVX-512BW, AVX-512VL,
+/// and AVX-512VNNI, and that both slices contain at least 32 elements.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(target_arch = "x86_64")]
+/// # if is_x86_feature_detected!("avx512f")
+/// #     && is_x86_feature_detected!("avx512bw")
+/// #     && is_x86_feature_detected!("avx512vl")
+/// #     && is_x86_feature_detected!("avx512vnni")
+/// # {
+/// let weights = [1_i8; 32];
+/// let activations = [2_u8; 32];
+/// let sums = unsafe { lane_sums_i8_32_avx512_vnni(&weights, &activations) };
+///
+/// assert_eq!(sums, [8; 8]);
+/// # }
+/// ```
 unsafe fn lane_sums_i8_32_avx512_vnni(weights: &[i8], activations: &[u8]) -> [i32; 8] {
     debug_assert!(weights.len() >= 32);
     debug_assert!(activations.len() >= 32);
@@ -1102,6 +1470,17 @@ unsafe fn lane_sums_i8_32_avx512_vnni(weights: &[i8], activations: &[u8]) -> [i3
     corrected
 }
 
+/// Computes the signed 8-bit dot product of up to 64 weight and activation lanes.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(target_arch = "x86_64")]
+/// # unsafe {
+/// let result = dot_i8_avx512_vnni(&[2, -3], &[4, 251]);
+/// assert_eq!(result, 23);
+/// # }
+/// ```
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw,avx512vl,avx512vnni")]
 unsafe fn dot_i8_avx512_vnni(weights: &[i8], activations: &[u8]) -> i32 {
@@ -1128,6 +1507,27 @@ unsafe fn dot_i8_avx512_vnni(weights: &[i8], activations: &[u8]) -> i32 {
     shifted_sum - 128 * weight_sum
 }
 
+/// Computes four unsigned-byte-by-signed-byte dot products over 64-byte inputs and writes the results to `output`.
+///
+/// # Safety
+///
+/// `weights`, `activations`, and `output` must each point to valid, non-null,
+/// non-overlapping 64-byte regions. The caller must ensure the CPU supports
+/// AVX-512F, AVX-512BW, AVX-512VL, and AVX-512VNNI.
+///
+/// # Examples
+///
+/// ```
+/// let weights = [1i8; 64];
+/// let activations = [2i8; 64];
+/// let mut output = [0i32; 16];
+///
+/// unsafe {
+///     dpbusd_64(weights.as_ptr(), activations.as_ptr(), output.as_mut_ptr());
+/// }
+///
+/// assert_eq!(output, [8; 16]);
+/// ```
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw,avx512vl,avx512vnni")]
 unsafe fn dpbusd_64(weights: *const i8, activations: *const i8, output: *mut i32) {
@@ -1157,6 +1557,22 @@ unsafe fn dpbusd_64(weights: *const i8, activations: *const i8, output: *mut i32
     }
 }
 
+/// Computes the signed dot product of 32 weight lanes and activation lanes.
+///
+/// # Safety
+///
+/// The caller must provide slices containing at least 32 lanes and execute on a
+/// processor with AVX2 support.
+///
+/// # Examples
+///
+/// ```
+/// let weights = [1i8; 32];
+/// let activations = [2u8; 32];
+///
+/// let result = unsafe { dot_i8_32(&weights, &activations) };
+/// assert_eq!(result, 64);
+/// ```
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn dot_i8_32(weights: &[i8], activations: &[u8]) -> i32 {

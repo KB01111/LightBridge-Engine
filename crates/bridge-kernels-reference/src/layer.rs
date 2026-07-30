@@ -98,6 +98,21 @@ pub struct Hy3BlockScratch {
 }
 
 impl Hy3BlockScratch {
+    /// Allocates reusable scratch space for evaluating a non-streaming Hy3 block.
+    ///
+    /// The allocation includes buffers sized for attention, feed-forward, routing, and
+    /// quantized batched expert operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the block dimensions are invalid, `context_capacity` is
+    /// zero, a size calculation overflows, or allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let scratch = Hy3BlockScratch::new(block, 1024)?;
+    /// ```
     pub fn new(block: Hy3BlockWeights<'_>, context_capacity: usize) -> Result<Self> {
         validate_block(block)?;
         if context_capacity == 0 {
@@ -209,6 +224,19 @@ impl Hy3BlockScratch {
         })
     }
 
+    /// Allocates reusable scratch space for routing and completing one streaming MoE block.
+    ///
+    /// The scratch space is sized for the block's attention, router, expert, and context
+    /// requirements. Returns an error if the block is invalid, `context_capacity` is zero,
+    /// a size calculation overflows, or allocation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # let block = todo!();
+    /// let scratch = Hy3BlockScratch::new_streaming_moe(block, 128)?;
+    /// # let _: Result<(), _> = Ok(());
+    /// ```
     pub fn new_streaming_moe(block: Hy3StreamingMoeWeights<'_>, context_capacity: usize) -> Result<Self> {
         validate_streaming_moe(block)?;
         if context_capacity == 0 {
@@ -367,8 +395,20 @@ impl Hy3FeedForwardWeights<'_> {
     }
 }
 
-/// Evaluates one token through attention, causal GQA/KV append, residual, and
-/// either the dense or routed/shared Hy3 feed-forward graph.
+/// Evaluates one token through attention, causal GQA/KV caching, residual connections,
+/// and either a dense or routed/shared feed-forward graph.
+///
+/// Updates `hidden_state` in place and records intermediate routing state in `scratch`.
+///
+/// # Examples
+///
+/// ```no_run
+/// hy3_block_forward_token(execution, block, &mut cache, &mut hidden_state, &mut scratch)?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// Returns an error if validation, tensor operations, attention, routing, or allocation
+/// requirements are not satisfied.
 pub fn hy3_block_forward_token(
     execution: Hy3BlockExecution,
     block: Hy3BlockWeights<'_>,
@@ -511,12 +551,20 @@ pub fn hy3_block_forward_token(
     residual_add_in_place(hidden_state, &scratch.ffn_delta)
 }
 
-/// Runs a MoE block through attention and authoritative routing without
-/// requiring all routed expert payloads to be resident.
+/// Runs attention and authoritative MoE routing for one token, deferring expert evaluation.
 ///
-/// The selected expert IDs and coefficients remain in [`Hy3BlockScratch::routed`].
-/// The caller loads only those expert payloads and completes the block with
+/// The attention result is applied to `hidden_state`. The selected expert IDs and
+/// coefficients are stored in [`Hy3BlockScratch::routed`]; the caller can then
+/// load those expert payloads and complete the block with
 /// [`hy3_moe_finish_token`].
+///
+/// # Examples
+///
+/// ```ignore
+/// hy3_moe_route_token(execution, block, &mut cache, &mut hidden_state, &mut scratch)?;
+/// hy3_moe_finish_token(mode, selected, shared, &mut hidden_state, &mut scratch)?;
+/// # Ok::<(), KernelError>(())
+/// ```
 pub fn hy3_moe_route_token(
     execution: Hy3BlockExecution,
     block: Hy3StreamingMoeWeights<'_>,

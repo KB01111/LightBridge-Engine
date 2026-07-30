@@ -5,14 +5,32 @@ typedef signed short i16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
+/**
+ * @brief Reads a little-endian unsigned 16-bit value from a byte buffer.
+ *
+ * @param bytes Pointer to the first byte of the encoded value.
+ * @return u16 The decoded unsigned 16-bit value.
+ */
 __device__ __forceinline__ u16 read_u16(const u8 *bytes) {
     return (u16)bytes[0] | ((u16)bytes[1] << 8);
 }
 
+/**
+ * @brief Reads a little-endian signed 16-bit integer.
+ *
+ * @param bytes Pointer to the two-byte value.
+ * @return i16 The decoded signed 16-bit value.
+ */
 __device__ __forceinline__ i16 read_i16(const u8 *bytes) {
     return (i16)read_u16(bytes);
 }
 
+/**
+ * @brief Reads a 32-bit unsigned integer in little-endian byte order.
+ *
+ * @param bytes Pointer to at least four bytes containing the encoded value.
+ * @return u32 The decoded unsigned 32-bit value.
+ */
 __device__ __forceinline__ u32 read_u32(const u8 *bytes) {
     return (u32)bytes[0]
         | ((u32)bytes[1] << 8)
@@ -20,10 +38,22 @@ __device__ __forceinline__ u32 read_u32(const u8 *bytes) {
         | ((u32)bytes[3] << 24);
 }
 
+/**
+ * @brief Reads a 32-bit floating-point value from little-endian bytes.
+ *
+ * @param bytes Pointer to four bytes containing the floating-point bit pattern.
+ * @return float The decoded 32-bit floating-point value.
+ */
 __device__ __forceinline__ float read_f32(const u8 *bytes) {
     return __uint_as_float(read_u32(bytes));
 }
 
+/**
+ * @brief Converts a half-precision floating-point bit pattern to a single-precision value.
+ *
+ * @param value IEEE 754 half-precision floating-point representation.
+ * @return float The corresponding single-precision value.
+ */
 __device__ __forceinline__ float half_to_float(u16 value) {
     u32 sign = ((u32)value & 0x8000u) << 16;
     u32 exponent = ((u32)value >> 10) & 0x1fu;
@@ -49,10 +79,24 @@ __device__ __forceinline__ float half_to_float(u16 value) {
     return __uint_as_float(bits);
 }
 
+/**
+ * @brief Reads a little-endian half-precision value and converts it to single precision.
+ *
+ * @param bytes Pointer to the two-byte half-precision value.
+ * @return float The converted single-precision value.
+ */
 __device__ __forceinline__ float read_f16(const u8 *bytes) {
     return half_to_float(read_u16(bytes));
 }
 
+/**
+ * @brief Extracts a packed scale and minimum value for a quantization group.
+ *
+ * @param scales Packed scale and minimum data.
+ * @param index Quantization group index.
+ * @param scale Receives the extracted scale value.
+ * @param minimum Receives the extracted minimum value.
+ */
 __device__ __forceinline__ void scale_min(
     const u8 *scales,
     int index,
@@ -70,6 +114,14 @@ __device__ __forceinline__ void scale_min(
     }
 }
 
+/**
+ * @brief Extracts a quantized Q4 or Q5 weight from packed storage.
+ *
+ * @param kind Quantization format selector: `0` for Q4, other values for Q5.
+ * @param weight Packed quantized weight data.
+ * @param offset Weight offset within the quantized block.
+ * @return The decoded quantized weight value.
+ */
 __device__ __forceinline__ int q4_q5_quant(
     int kind,
     const u8 *weight,
@@ -90,6 +142,15 @@ __device__ __forceinline__ int q4_q5_quant(
     return low + ((high_bits & mask) != 0 ? 16 : 0);
 }
 
+/**
+ * @brief Computes the dot product for Q4 or Q5 quantized weights and Q8 activations.
+ *
+ * @param kind Quantization format selector: `0` for Q4 or another value for Q5.
+ * @param weights Packed quantized weight blocks.
+ * @param q8 Quantized activation blocks.
+ * @param block_count Number of 256-element quantization blocks to process.
+ * @return float Accumulated dot-product value.
+ */
 __device__ float dot_q4_q5(
     int kind,
     const u8 *weights,
@@ -140,6 +201,15 @@ __device__ float dot_q4_q5(
     return total;
 }
 
+/**
+ * @brief Computes a dot product for IQ2-quantized weights and int8 activations.
+ *
+ * @param weights IQ2-quantized weight data.
+ * @param q8 Int8 activation data.
+ * @param grid Lookup table containing packed IQ2 magnitudes.
+ * @param block_count Number of 256-element blocks to process.
+ * @return Scaled dot-product result.
+ */
 __device__ float dot_iq2(
     const u8 *weights,
     const u8 *q8,
@@ -180,6 +250,15 @@ __device__ float dot_iq2(
     return 0.125f * total;
 }
 
+/**
+ * @brief Computes the dot product for IQ3-quantized weights and int8 activations.
+ *
+ * @param weights Packed IQ3 weight data organized into 110-byte blocks.
+ * @param q8 Quantized activation data organized into 292-byte blocks.
+ * @param grid Lookup table for packed IQ3 magnitudes.
+ * @param block_count Number of weight and activation blocks to process.
+ * @return float Accumulated scaled dot product.
+ */
 __device__ float dot_iq3(
     const u8 *weights,
     const u8 *q8,
@@ -237,7 +316,19 @@ __device__ float dot_iq3(
     return total;
 }
 
-extern "C" __global__ void bridge_q8k_gemv_v1(
+extern "C" /**
+ * @brief Computes one quantized GEMV result for each active row.
+ *
+ * @param kind Quantization format selector.
+ * @param weights Packed quantized weights for all rows.
+ * @param q8 Quantized activation data.
+ * @param iq2_grid Lookup table for IQ2 quantization.
+ * @param iq3_grid Lookup table for IQ3 quantization.
+ * @param logical_elements Number of logical elements processed per row.
+ * @param rows Number of output rows.
+ * @param output Destination array for the computed row results.
+ */
+__global__ void bridge_q8k_gemv_v1(
     int kind,
     const u8 *weights,
     const u8 *q8,

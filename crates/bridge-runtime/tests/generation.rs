@@ -182,14 +182,37 @@ fn prefill_projects_only_the_final_prompt_position() {
         type Session = usize;
         type Error = Infallible;
 
+        /// Reports the fixed number of tokens supported by the model.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let model = MockModel { context: 16 };
+        /// assert_eq!(model.vocabulary_size(), 4);
+        /// ```
         fn vocabulary_size(&self) -> usize {
             4
         }
 
+        /// Reports the model's maximum supported context length.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// assert_eq!(model.context_length(), 16);
+        /// ```
         fn context_length(&self) -> usize {
             16
         }
 
+        /// Creates a session initialized at position zero.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let session = model.new_session().unwrap();
+        /// assert_eq!(session, 0);
+        /// ```
         fn new_session(&self) -> Result<Self::Session, Self::Error> {
             Ok(0)
         }
@@ -198,14 +221,46 @@ fn prefill_projects_only_the_final_prompt_position() {
             *session = 0;
         }
 
+        /// Reports the current position in the session.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let session = 3;
+        /// assert_eq!(*&session, 3);
+        /// ```
         fn position(&self, session: &Self::Session) -> usize {
             *session
         }
 
+        /// Specifies that prefill should process tokens in chunks of two.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let chunk_size = 2;
+        /// assert_eq!(chunk_size, 2);
+        /// ```
         fn preferred_prefill_chunk(&self) -> usize {
             2
         }
 
+        /// Evaluates a token for the session and updates the logits with the predicted next-token scores.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// let model = MockModel { context: 16 };
+        /// let mut session = model.new_session();
+        /// let mut logits = vec![0.0; model.vocabulary_size()];
+        ///
+        /// model.evaluate_token(&mut session, 0, &mut logits).unwrap();
+        /// assert_eq!(model.position(&session), 1);
+        /// ```
+        ///
+        /// # Returns
+        ///
+        /// `Ok(())` when evaluation succeeds.
         fn evaluate_token(
             &self,
             session: &mut Self::Session,
@@ -215,6 +270,25 @@ fn prefill_projects_only_the_final_prompt_position() {
             self.evaluate_token_with_projection(session, token_id, logits, true)
         }
 
+        /// Evaluates one token and optionally projects its logits into the provided buffer.
+        ///
+        /// When projection is enabled, the logits identify `(token_id + 1) % 4` as the
+        /// preferred next token and all other vocabulary entries receive a lower score.
+        ///
+        /// # Examples
+        ///
+        /// ```rust,ignore
+        /// let mut logits = vec![0.0; 4];
+        /// model.evaluate_token_with_projection(&mut session, 0, &mut logits, true)?;
+        /// assert_eq!(logits[1], 10.0);
+        /// # Ok::<(), _>(())
+        /// ```
+        ///
+        /// # Arguments
+        ///
+        /// * `token_id` - Token whose deterministic successor is represented in `logits`.
+        /// * `logits` - Buffer to populate when projection is enabled.
+        /// * `project_logits` - Whether to populate the logits buffer.
         fn evaluate_token_with_projection(
             &self,
             session: &mut Self::Session,
@@ -231,6 +305,23 @@ fn prefill_projects_only_the_final_prompt_position() {
             Ok(())
         }
 
+        /// Evaluates a batch of tokens and optionally projects logits for the final token.
+        ///
+        /// # Parameters
+        ///
+        /// * `token_ids` - Tokens to evaluate in order.
+        /// * `project_logits` - Whether to project logits for the final token.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// model.evaluate_tokens_with_projection(&mut session, &tokens, &mut logits, true)?;
+        /// # Ok::<(), ModelError>(())
+        /// ```
+        ///
+        /// # Errors
+        ///
+        /// Returns the first error encountered while evaluating a token.
         fn evaluate_tokens_with_projection(
             &self,
             session: &mut Self::Session,
@@ -277,6 +368,22 @@ struct SpeculativeModel {
 }
 
 impl SpeculativeModel {
+    /// Writes deterministic logits for the next token in the speculative decoding sequence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let model = SpeculativeModel {
+    ///     reject_second: false,
+    ///     grouped_calls: Arc::new(AtomicUsize::new(0)),
+    ///     rewinds: Arc::new(AtomicUsize::new(0)),
+    /// };
+    /// let mut logits = [0.0; 4];
+    ///
+    /// model.write_logits(0, &mut logits);
+    ///
+    /// assert_eq!(logits, [-10.0, 10.0, -10.0, -10.0]);
+    /// ```
     fn write_logits(&self, token_id: u32, logits: &mut [f32]) {
         let next = match token_id {
             0 => 1,
@@ -294,34 +401,104 @@ impl CausalModel for SpeculativeModel {
     type Session = usize;
     type Error = Infallible;
 
+    /// Reports the model's fixed vocabulary size.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let model = MockModel { context: 16 };
+    /// assert_eq!(model.vocabulary_size(), 4);
+    /// ```
     fn vocabulary_size(&self) -> usize {
         4
     }
 
+    /// Reports the maximum number of tokens supported by the model context.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(32, 32);
+    /// ```
     fn context_length(&self) -> usize {
         32
     }
 
+    /// Creates a new session positioned at the start of evaluation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let session = model.new_session()?;
+    /// assert_eq!(session, 0);
+    /// # Ok::<(), _>(())
+    /// ```
     fn new_session(&self) -> Result<Self::Session, Self::Error> {
         Ok(0)
     }
 
+    /// Resets the session position to the beginning.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut session = 5;
+    /// *session = 0;
+    /// assert_eq!(session, 0);
+    /// ```
     fn reset_session(&self, session: &mut Self::Session) {
         *session = 0;
     }
 
+    /// Reports the current position within a session.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let model = MockModel { context: 16 };
+    /// let session = model.new_session();
+    ///
+    /// assert_eq!(model.position(&session), 0);
+    /// ```
     fn position(&self, session: &Self::Session) -> usize {
         *session
     }
 
+    /// Specifies that prompt prefill should process two tokens per chunk.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let chunk_size = 2;
+    /// assert_eq!(chunk_size, 2);
+    /// ```
     fn preferred_prefill_chunk(&self) -> usize {
         2
     }
 
+    /// Enables speculative n-gram generation with a width of two.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let width: Option<usize> = Some(2);
+    /// assert_eq!(width, Some(2));
+    /// ```
     fn speculative_ngram_t(&self) -> Option<usize> {
         Some(2)
     }
 
+    /// Evaluates a token, advances the session position, and writes the resulting logits.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut session = 0;
+    /// let mut logits = vec![0.0; 4];
+    /// model.evaluate_token(&mut session, 0, &mut logits)?;
+    /// assert_eq!(session, 1);
+    /// # Ok::<(), _>(())
+    /// ```
     fn evaluate_token(
         &self,
         session: &mut Self::Session,
@@ -333,6 +510,21 @@ impl CausalModel for SpeculativeModel {
         Ok(())
     }
 
+    /// Evaluates a batch of speculative tokens and writes one logits row for each token.
+    ///
+    /// The session position advances once for each token paired with a four-element logits
+    /// row. This implementation always reports successful evaluation.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let mut session = model.new_session();
+    /// let token_ids = [0, 1];
+    /// let mut logits = vec![0.0; 8];
+    ///
+    /// model.evaluate_speculative_tokens(&mut session, &token_ids, &mut logits);
+    /// assert_eq!(model.position(&session), 2);
+    /// ```
     fn evaluate_speculative_tokens(
         &self,
         session: &mut Self::Session,
@@ -347,6 +539,17 @@ impl CausalModel for SpeculativeModel {
         Some(Ok(()))
     }
 
+    /// Rewinds the speculative session to the specified position.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let mut session = model.new_session();
+    /// let result = model.rewind_speculative(&mut session, 2);
+    ///
+    /// assert!(result.is_some());
+    /// assert_eq!(model.position(&session), 2);
+    /// ```
     fn rewind_speculative(
         &self,
         session: &mut Self::Session,
@@ -358,6 +561,23 @@ impl CausalModel for SpeculativeModel {
     }
 }
 
+/// Creates a speculative-decoding generator and counters for grouped evaluations and rewinds.
+///
+/// # Parameters
+///
+/// `reject_second` determines whether the speculative model rejects its second candidate token.
+///
+/// # Returns
+///
+/// A generator, a counter for grouped speculative evaluations, and a counter for speculative rewinds.
+///
+/// # Examples
+///
+/// ```
+/// let (_generator, grouped_calls, rewinds) = speculative_generator(false);
+/// assert_eq!(grouped_calls.load(Ordering::Relaxed), 0);
+/// assert_eq!(rewinds.load(Ordering::Relaxed), 0);
+/// ```
 fn speculative_generator(
     reject_second: bool,
 ) -> (Generator<SpeculativeModel>, Arc<AtomicUsize>, Arc<AtomicUsize>) {

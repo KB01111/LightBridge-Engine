@@ -176,14 +176,62 @@ impl<'a> PackedMatrix<'a> {
         self.output_width
     }
 
+    /// Gets the encoded size of each matrix row in bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let matrix = PackedMatrix::from_parts(
+    ///     GgmlType::F32,
+    ///     PayloadEndian::Little,
+    ///     2,
+    ///     1,
+    ///     &[0; 8],
+    /// ).unwrap();
+    /// assert_eq!(matrix.row_bytes(), 8);
+    /// ```
     pub const fn row_bytes(self) -> usize {
         self.row_bytes
     }
 
+    /// Provides access to the encoded matrix bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let matrix = PackedMatrix::from_parts(
+    ///     GgmlType::F32,
+    ///     PayloadEndian::Little,
+    ///     1,
+    ///     1,
+    ///     &[0, 0, 0, 0],
+    /// ).unwrap();
+    /// assert_eq!(matrix.bytes(), &[0, 0, 0, 0]);
+    /// ```
     pub const fn bytes(self) -> &'a [u8] {
         self.bytes
     }
 
+    /// Provides the encoded bytes for a matrix row.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` does not identify a complete row in the matrix.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes: Vec<u8> = (0..16).collect();
+    /// let matrix = PackedMatrix::from_parts(
+    ///     GgmlType::F32,
+    ///     PayloadEndian::Little,
+    ///     2,
+    ///     2,
+    ///     &bytes,
+    /// ).unwrap();
+    ///
+    /// assert_eq!(matrix.row(1), &[8, 9, 10, 11]);
+    /// ```
     pub fn row(self, index: usize) -> &'a [u8] {
         let start = index * self.row_bytes;
         &self.bytes[start..start + self.row_bytes]

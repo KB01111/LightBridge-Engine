@@ -18,6 +18,19 @@ pub enum ReferenceExecutionMode {
     CudaQ8K,
 }
 
+/// Calculates the scratch-buffer size required to quantize an input row into Q8_K format.
+///
+/// # Errors
+///
+/// Returns an error if `input_width` is zero, is not a multiple of the Q8_K block size,
+/// or if the required byte count overflows `usize`.
+///
+/// # Examples
+///
+/// ```
+/// let bytes = required_q8_k_bytes(Q8_K_BLOCK_ELEMENTS).unwrap();
+/// assert_eq!(bytes, Q8_K_BLOCK_BYTES);
+/// ```
 pub fn required_q8_k_bytes(input_width: usize) -> Result<usize> {
     if input_width == 0 || input_width % Q8_K_BLOCK_ELEMENTS != 0 {
         return Err(KernelError::DimensionMismatch {
@@ -43,6 +56,45 @@ pub fn gemv_dequant_f32_into(
     compute_dequant_into(matrix, input, output, decoded_block_scratch)
 }
 
+/// Computes a matrix–vector product using scalar Q8_K quantization.
+
+///
+
+/// `q8_scratch` must provide enough storage for the quantized input row.
+
+/// The output slice must have one element per matrix row.
+
+///
+
+/// # Examples
+
+///
+
+/// ```no_run
+
+/// # let matrix: PackedMatrix<'_> = unimplemented!();
+
+/// # let input = vec![1.0_f32; 32];
+
+/// # let mut output = vec![0.0_f32; 4];
+
+/// # let mut q8_scratch = vec![0_u8; 256];
+
+/// gemv_llama_q8k_into(matrix, &input, &mut output, &mut q8_scratch)?;
+
+/// # Ok::<(), KernelError>(())
+
+/// ```
+
+///
+
+/// # Errors
+
+///
+
+/// Returns an error if the dimensions, scratch buffer, matrix type, or
+
+/// prepared Q8_K representation is invalid.
 pub fn gemv_llama_q8k_into(
     matrix: PackedMatrix<'_>,
     input: &[f32],
@@ -57,6 +109,21 @@ pub fn gemv_llama_q8k_into(
     Ok(())
 }
 
+/// Computes a packed Q8_K matrix-vector product using the selected CPU backend in parallel.
+///
+/// # Examples
+///
+/// ```no_run
+/// # let matrix = todo!();
+/// # let input = todo!();
+/// # let mut output = todo!();
+/// # let mut q8_scratch = todo!();
+/// gemv_cpu_parallel_q8k_into(matrix, input, &mut output, &mut q8_scratch)?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// `q8_scratch` must provide sufficient space for the input's Q8_K representation.
+pub fn gemv_cpu_parallel_q8k_into(
 pub fn gemv_cpu_parallel_q8k_into(
     matrix: PackedMatrix<'_>,
     input: &[f32],
@@ -74,6 +141,39 @@ pub fn gemv_cpu_parallel_q8k_into(
         })
 }
 
+/// Computes matrix-vector products in parallel using AVX512 VNNI Q8_K execution.
+
+///
+
+/// # Examples
+
+///
+
+/// ```
+
+/// # let matrix: PackedMatrix<'_> = todo!();
+
+/// # let input = vec![0.0; matrix.input_width()];
+
+/// # let mut output = vec![0.0; matrix.output_width()];
+
+/// # let mut q8_scratch = vec![0; required_q8_k_bytes(matrix.input_width()).unwrap()];
+
+/// gemv_cpu_parallel_avx512_vnni_into(matrix, &input, &mut output, &mut q8_scratch)?;
+
+/// # Ok::<(), KernelError>(())
+
+/// ```
+
+///
+
+/// # Errors
+
+///
+
+/// Returns an error if the matrix, dimensions, scratch space, or AVX512 VNNI
+
+/// execution parameters are invalid.
 pub fn gemv_cpu_parallel_avx512_vnni_into(
     matrix: PackedMatrix<'_>,
     input: &[f32],
@@ -91,6 +191,26 @@ pub fn gemv_cpu_parallel_avx512_vnni_into(
         })
 }
 
+/// Computes a packed Q8_K matrix-vector product using parallel AVX VNNI execution.
+///
+/// # Parameters
+///
+/// * `q8_scratch` — Scratch storage used to hold the quantized input row.
+///
+/// # Examples
+///
+/// ```
+/// # fn example(
+/// #     matrix: PackedMatrix<'_>,
+/// #     input: &[f32],
+/// #     output: &mut [f32],
+/// #     q8_scratch: &mut [u8],
+/// # ) -> Result<()> {
+/// gemv_cpu_parallel_avx_vnni_into(matrix, input, output, q8_scratch)?;
+/// # Ok(())
+/// # }
+/// ```
+pub fn gemv_cpu_parallel_avx_vnni_into(
 pub fn gemv_cpu_parallel_avx_vnni_into(
     matrix: PackedMatrix<'_>,
     input: &[f32],
@@ -108,6 +228,33 @@ pub fn gemv_cpu_parallel_avx_vnni_into(
         })
 }
 
+/// Computes a matrix-vector product using the CUDA Q8_K execution path.
+///
+/// The input is quantized into `q8_scratch`, and `output` is populated with the
+/// resulting values. The matrix must use a supported Q8_K-compatible packed
+/// type, and the scratch buffer must have sufficient capacity.
+///
+/// # Examples
+///
+/// ```ignore
+/// let mut output = vec![0.0; matrix.output_width()];
+/// let mut q8_scratch = vec![0; required_q8_k_bytes(matrix.input_width())?];
+///
+/// gemv_cuda_q8k_into(matrix, &input, &mut output, &mut q8_scratch)?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if dimensions or scratch capacity are invalid, the matrix
+/// type is unsupported, CUDA execution fails, or the output contains a
+/// non-finite value.
+pub fn gemv_cuda_q8k_into(
+matrix: PackedMatrix<'_>,
+input: &[f32],
+output: &mut [f32],
+q8_scratch: &mut [u8],
+) -> Result<()> {
 pub fn gemv_cuda_q8k_into(
     matrix: PackedMatrix<'_>,
     input: &[f32],
@@ -120,6 +267,14 @@ pub fn gemv_cuda_q8k_into(
     validate_finite_slice("CUDA GEMV output", output)
 }
 
+/// Computes F32 matrix-vector products in parallel across output rows.
+///
+/// # Examples
+///
+/// ```ignore
+/// gemv_cpu_parallel_f32_into(matrix, input, &mut output, &mut scratch)?;
+/// # Ok::<(), KernelError>(())
+/// ```
 fn gemv_cpu_parallel_f32_into(
     matrix: PackedMatrix<'_>,
     input: &[f32],
@@ -136,6 +291,38 @@ fn gemv_cpu_parallel_f32_into(
         })
 }
 
+/// Computes a matrix-vector product using the selected reference execution mode.
+///
+/// # Examples
+///
+/// ```
+/// # let mode = ReferenceExecutionMode::DequantF32;
+/// # let matrix = matrix;
+/// # let input = input;
+/// # let mut output = output;
+/// # let mut decoded_block_scratch = decoded_block_scratch;
+/// # let mut q8_scratch = q8_scratch;
+/// gemv_into(
+///     mode,
+///     matrix,
+///     input,
+///     &mut output,
+///     &mut decoded_block_scratch,
+///     &mut q8_scratch,
+/// )?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// `decoded_block_scratch` provides workspace for dequantization, while
+/// `q8_scratch` provides workspace for Q8_K input quantization.
+pub fn gemv_into(
+mode: ReferenceExecutionMode,
+matrix: PackedMatrix<'_>,
+input: &[f32],
+output: &mut [f32],
+decoded_block_scratch: &mut [f32],
+q8_scratch: &mut [u8],
+) -> Result<()> {
 pub fn gemv_into(
     mode: ReferenceExecutionMode,
     matrix: PackedMatrix<'_>,
@@ -175,6 +362,42 @@ pub fn gemv_into(
     }
 }
 
+/// Adds the matrix–input product, multiplied by `scale`, to `destination`.
+///
+/// The destination and scale must contain finite values. The selected execution
+/// mode determines the computation backend.
+///
+/// # Examples
+///
+/// ```no_run
+/// # let mode = todo!();
+/// # let matrix = todo!();
+/// # let input = todo!();
+/// # let mut destination = todo!();
+/// # let mut decoded_block_scratch = todo!();
+/// # let mut q8_scratch = todo!();
+/// gemv_accumulate_scaled_into(
+///     mode,
+///     matrix,
+///     input,
+///     &mut destination,
+///     1.0,
+///     &mut decoded_block_scratch,
+///     &mut q8_scratch,
+/// )?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// # Parameters
+///
+/// `scale` is multiplied by each computed matrix–input product before it is
+/// added to the corresponding destination element.
+///
+/// # Errors
+///
+/// Returns an error when dimensions, scratch capacity, values, or the selected
+/// execution backend are invalid.
+pub fn gemv_accumulate_scaled_into(
 pub fn gemv_accumulate_scaled_into(
     mode: ReferenceExecutionMode,
     matrix: PackedMatrix<'_>,
@@ -283,9 +506,31 @@ pub fn gemv_accumulate_scaled_into(
     Ok(())
 }
 
-/// Evaluates two projections of the same input while quantizing that input
-/// only once on the packed Q8_K paths. This is the gate/up hot path for
-/// SwiGLU experts.
+/// Evaluates two projections of the same input, sharing Q8_K quantization on packed execution paths.
+///
+/// This is the paired projection path used for gate and up projections in SwiGLU experts.
+///
+/// # Examples
+///
+/// ```no_run
+/// # // Create `matrices`, `input`, `outputs`, and scratch buffers for the model.
+/// gemv_pair_into(
+///     mode,
+///     matrices,
+///     input,
+///     outputs,
+///     &mut decoded_block_scratch,
+///     &mut q8_scratch,
+/// )?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error when dimensions or scratch capacity are invalid, when the
+/// selected execution mode is unsupported, or when execution produces invalid
+/// values.
+pub fn gemv_pair_into(
 pub fn gemv_pair_into(
     mode: ReferenceExecutionMode,
     matrices: [PackedMatrix<'_>; 2],
@@ -361,8 +606,36 @@ pub fn gemv_pair_into(
     compute_prepared_q8k_into(mode, second_prepared, second_output)
 }
 
-/// Evaluates three same-input projections. CUDA submits all three matrices
-/// under one validation, transfer, and synchronization boundary.
+/// Evaluates three projections that share the same input.
+///
+/// Uses a CUDA batch execution path for three packed matrices when available;
+/// otherwise, evaluates the projections sequentially using the selected mode.
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let matrices = [todo!(), todo!(), todo!()];
+/// let mut first = Vec::new();
+/// let mut second = Vec::new();
+/// let mut third = Vec::new();
+///
+/// gemv_triplet_into(
+///     ReferenceExecutionMode::DequantF32,
+///     matrices,
+///     &[],
+///     [&mut first, &mut second, &mut third],
+///     &mut [],
+///     &mut [],
+/// )?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if dimensions, scratch capacity, values, or the selected
+/// execution mode are invalid, or if CUDA execution fails.
 pub fn gemv_triplet_into(
     mode: ReferenceExecutionMode,
     matrices: [PackedMatrix<'_>; 3],
@@ -450,6 +723,18 @@ pub fn gemv_triplet_into(
     Ok(())
 }
 
+/// Validates that every value in a slice is finite.
+///
+/// # Examples
+///
+/// ```
+/// let values = [1.0, -2.5, 0.0];
+/// assert!(validate_finite_slice("values", &values).is_ok());
+/// ```
+///
+/// # Returns
+///
+/// `Ok(())` when all values are finite; otherwise, an error identifying the first non-finite value.
 pub(crate) fn validate_finite_slice(field: &'static str, values: &[f32]) -> Result<()> {
     for (index, &value) in values.iter().enumerate() {
         validate_finite_value(field, index, value)?;
@@ -519,6 +804,21 @@ fn prepare_dequant(
     Ok(())
 }
 
+/// Prepares a quantized Q8_K representation of the input for a supported packed matrix.
+///
+/// # Errors
+///
+/// Returns an error if the dimensions are invalid, the matrix type is unsupported,
+/// the scratch buffer is too small, or quantization fails.
+///
+/// # Examples
+///
+/// ```ignore
+/// let q8 = prepare_llama_q8k(matrix, input, output, &mut q8_scratch)?;
+/// assert!(!q8.is_empty());
+/// # Ok::<(), KernelError>(())
+/// ```
+///
 fn prepare_llama_q8k<'a>(
     matrix: PackedMatrix<'_>,
     input: &[f32],
@@ -545,6 +845,14 @@ fn prepare_llama_q8k<'a>(
     Ok(q8)
 }
 
+/// Selects the fastest available CPU backend supported for dot-product execution.
+///
+/// # Examples
+///
+/// ```
+/// let backend = default_cpu_dot_backend();
+/// assert!(matches!(backend, CpuDotBackend::Avx2 | CpuDotBackend::Scalar));
+/// ```
 fn default_cpu_dot_backend() -> CpuDotBackend {
     if CpuDotBackend::Avx2.available() {
         CpuDotBackend::Avx2
@@ -553,6 +861,20 @@ fn default_cpu_dot_backend() -> CpuDotBackend {
     }
 }
 
+/// Selects the CPU dot-product backend for a packed Q8_K execution mode.
+///
+/// # Errors
+///
+/// Returns an error for execution modes that use dequantized or CUDA execution.
+///
+/// # Examples
+///
+/// ```
+/// let backend = dot_backend_for_mode(ReferenceExecutionMode::LlamaQ8K)?;
+/// assert_eq!(backend, CpuDotBackend::Scalar);
+/// # Ok::<(), KernelError>(())
+/// ```
+fn dot_backend_for_mode(mode: ReferenceExecutionMode) -> Result<CpuDotBackend> {
 fn dot_backend_for_mode(mode: ReferenceExecutionMode) -> Result<CpuDotBackend> {
     match mode {
         ReferenceExecutionMode::LlamaQ8K => Ok(CpuDotBackend::Scalar),
@@ -570,6 +892,22 @@ fn dot_backend_for_mode(mode: ReferenceExecutionMode) -> Result<CpuDotBackend> {
     }
 }
 
+/// Validates a packed Q8_K matrix and prepares it for the selected CPU dot-product backend.
+///
+/// # Examples
+///
+/// ```
+/// let prepared = validate_prepared_q8k(matrix, q8, CpuDotBackend::Scalar)?;
+/// # Ok::<(), KernelError>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the matrix metadata, packed weights, Q8_K input, or selected
+/// backend is invalid.
+///
+/// `backend` selects the CPU implementation used for dot products.
+fn validate_prepared_q8k...
 fn validate_prepared_q8k<'a>(
     matrix: PackedMatrix<'a>,
     q8: &'a [u8],
@@ -585,6 +923,26 @@ fn validate_prepared_q8k<'a>(
     )?)
 }
 
+/// Computes output rows from a validated packed Q8_K matrix using the selected CPU execution mode.
+///
+/// # Errors
+///
+/// Returns an error if the selected mode is not a supported packed Q8_K CPU mode or if
+/// computing any output row fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// # let prepared: ValidatedQ8KMatrix<'_> = todo!();
+/// let mut output = vec![0.0; 4];
+///
+/// compute_prepared_q8k_into(
+///     ReferenceExecutionMode::CpuParallelQ8K,
+///     prepared,
+///     &mut output,
+/// )?;
+/// # Ok::<(), KernelError>(())
+/// ```
 fn compute_prepared_q8k_into(
     mode: ReferenceExecutionMode,
     prepared: ValidatedQ8KMatrix<'_>,
@@ -639,12 +997,41 @@ fn compute_prepared_q8k_into(
     Ok(())
 }
 
+/// Converts a CUDA runtime error into a [`KernelError::Cuda`].
+///
+/// # Examples
+///
+/// ```ignore
+/// let kernel_error = cuda_error(cuda_runtime_error);
+/// assert!(matches!(kernel_error, KernelError::Cuda { .. }));
+/// ```
+///
+/// The original error message is preserved in the returned kernel error.
 fn cuda_error(error: bridge_kernels_cuda::CudaRuntimeError) -> KernelError {
     KernelError::Cuda {
         message: error.to_string(),
     }
 }
 
+/// Computes each output row by dequantizing the corresponding packed matrix weights.
+///
+/// The output slice is overwritten with the resulting dot products. The scratch
+/// buffer is reused while processing individual weight blocks.
+///
+/// # Examples
+///
+/// ```no_run
+/// # let matrix: PackedMatrix<'_> = todo!();
+/// # let input: &[f32] = &[];
+/// # let mut output = vec![0.0; matrix.output_width()];
+/// # let mut decoded_block_scratch = vec![0.0; 1];
+/// compute_dequant_into(matrix, input, &mut output, &mut decoded_block_scratch)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Returns
+///
+/// `Ok(())` after populating the output, or an error if dequantization fails.
 fn compute_dequant_into(
     matrix: PackedMatrix<'_>,
     input: &[f32],

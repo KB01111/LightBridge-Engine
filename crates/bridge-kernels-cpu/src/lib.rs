@@ -34,6 +34,17 @@ pub struct CpuCapabilities {
 }
 
 impl CpuCapabilities {
+    /// Detects the CPU instruction-set capabilities used by the backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let capabilities = CpuCapabilities::detect();
+    /// assert!(matches!(
+    ///     capabilities.backend_name(),
+    ///     "cpu_parallel_avx2_q8_k" | "cpu_parallel_scalar_q8_k"
+    /// ));
+    /// ```
     pub fn detect() -> Self {
         #[cfg(target_arch = "x86_64")]
         {
@@ -61,14 +72,60 @@ impl CpuCapabilities {
         }
     }
 
+    /// Determines whether the AVX2 dot-product kernel is available.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let capabilities = CpuCapabilities::detect();
+    /// assert_eq!(
+    ///     capabilities.avx2_dot_kernel_available(),
+    ///     cfg!(target_arch = "x86_64") && capabilities.avx2
+    /// );
+    /// ```
+    ///
+    /// `true` if the target is `x86_64` and AVX2 is available, `false` otherwise.
     pub const fn avx2_dot_kernel_available(self) -> bool {
         cfg!(target_arch = "x86_64") && self.avx2
     }
 
+    /// Determines whether the AVX VNNI dot-product kernel is available.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let capabilities = CpuCapabilities::detect();
+    /// let available = capabilities.avx_vnni_dot_kernel_available();
+    ///
+    /// assert_eq!(
+    ///     available,
+    ///     cfg!(target_arch = "x86_64") && capabilities.avx2 && capabilities.avx_vnni
+    /// );
+    /// ```
     pub const fn avx_vnni_dot_kernel_available(self) -> bool {
         cfg!(target_arch = "x86_64") && self.avx2 && self.avx_vnni
     }
 
+    /// Determines whether the required AVX-512 features are available for the dot kernel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let capabilities = CpuCapabilities::detect();
+    /// let available = capabilities.avx512_dot_kernel_available();
+    /// assert_eq!(
+    ///     available,
+    ///     cfg!(target_arch = "x86_64")
+    ///         && capabilities.avx2
+    ///         && capabilities.avx512f
+    ///         && capabilities.avx512bw
+    ///         && capabilities.avx512vl
+    ///         && capabilities.avx512_vnni
+    /// );
+    /// ```
+    ///
+    /// Returns `true` when the target is x86_64 and AVX2, AVX-512F, AVX-512BW,
+    /// AVX-512VL, and AVX-512 VNNI are available; `false` otherwise.
     pub const fn avx512_dot_kernel_available(self) -> bool {
         cfg!(target_arch = "x86_64")
             && self.avx2
@@ -78,6 +135,21 @@ impl CpuCapabilities {
             && self.avx512_vnni
     }
 
+    /// Selects the backend name based on AVX2 dot-kernel availability.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let capabilities = CpuCapabilities::detect();
+    /// let name = capabilities.backend_name();
+    ///
+    /// assert!(
+    ///     name == "cpu_parallel_avx2_q8_k" || name == "cpu_parallel_scalar_q8_k"
+    /// );
+    /// ```
+    ///
+    /// Returns `"cpu_parallel_avx2_q8_k"` when AVX2 is available; otherwise,
+    /// returns `"cpu_parallel_scalar_q8_k"`.
     pub const fn backend_name(self) -> &'static str {
         if self.avx2_dot_kernel_available() {
             "cpu_parallel_avx2_q8_k"
@@ -106,10 +178,43 @@ impl std::fmt::Debug for CpuBackend {
 }
 
 impl CpuBackend {
+    /// Creates a CPU backend using the configured worker count without explicit CPU affinity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let backend = CpuBackend::new(CpuBackendConfig { threads: 1 }).unwrap();
+    /// assert_eq!(backend.config().threads, 1);
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration is invalid or the worker pool cannot be built.
     pub fn new(config: CpuBackendConfig) -> Result<Self, CpuBackendError> {
         Self::new_with_cpu_set(config, &[])
     }
 
+    /// Creates a bounded CPU backend, optionally assigning one CPU ID to each worker thread.
+    ///
+    /// An empty CPU ID slice disables CPU affinity. Otherwise, the slice must contain
+    /// exactly one unique CPU ID per configured worker thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the thread count is zero, the CPU ID count is invalid,
+    /// CPU IDs contain duplicates, thread-pool construction fails, or CPU affinity
+    /// assignment fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let backend = CpuBackend::new_with_cpu_set(
+    ///     CpuBackendConfig { threads: 1 },
+    ///     &[],
+    /// ).unwrap();
+    ///
+    /// assert_eq!(backend.cpu_set_ids(), &[]);
+    /// ```
     pub fn new_with_cpu_set(config: CpuBackendConfig, cpu_set_ids: &[u32]) -> Result<Self, CpuBackendError> {
         if config.threads == 0 {
             return Err(CpuBackendError::ZeroThreads);
@@ -155,14 +260,41 @@ impl CpuBackend {
         self.config
     }
 
+    /// Provides the CPU capabilities detected when the backend was created.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let backend = CpuBackend::new(CpuBackendConfig { threads: 1 }).unwrap();
+    /// let capabilities = backend.capabilities();
+    /// assert_eq!(capabilities, CpuCapabilities::detect());
+    /// ```
+    ///
+    /// Returns the detected CPU capabilities.
     pub const fn capabilities(&self) -> CpuCapabilities {
         self.capabilities
     }
 
+    /// Returns the CPU IDs selected for worker-thread affinity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let backend = CpuBackend::new(CpuBackendConfig { threads: 1 }).unwrap();
+    /// assert!(backend.cpu_set_ids().is_empty());
+    /// ```
     pub fn cpu_set_ids(&self) -> &[u32] {
         &self.cpu_set_ids
     }
 
+    /// Identifies the execution mode used by this backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let backend = CpuBackend::new(CpuBackendConfig { threads: 1 }).unwrap();
+    /// assert_eq!(backend.execution_mode(), ReferenceExecutionMode::CpuParallelQ8K);
+    /// ```
     pub const fn execution_mode(&self) -> ReferenceExecutionMode {
         ReferenceExecutionMode::CpuParallelQ8K
     }
